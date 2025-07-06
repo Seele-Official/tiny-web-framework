@@ -18,7 +18,7 @@ public:
     io_ctx& operator=(const io_ctx&) = delete;
     io_ctx& operator=(io_ctx&&) = delete;
 
-    io_ctx(uint32_t entries = 256, uint32_t flags = 0) : pending_requests{0} {
+    io_ctx(uint32_t entries = 1024, uint32_t flags = 0) : max_entries{entries}, pending_requests{0} {
         io_uring_queue_init(entries, &ring, flags);
     }
     ~io_ctx();
@@ -52,6 +52,7 @@ private:
     io_uring ring;
     std::mutex ring_m;
     std::stop_source stop_src;
+    const size_t max_entries;
     std::atomic<size_t> pending_requests;
 };
 

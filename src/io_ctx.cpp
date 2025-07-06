@@ -3,6 +3,7 @@
 #include "log.h"
 #include <atomic>
 #include <cstring>
+#include <print>
 using namespace seele;
 
 void io_ctx::worker(std::stop_token stop_token){
@@ -40,7 +41,7 @@ void io_ctx::worker(std::stop_token stop_token){
 io_ctx::~io_ctx() {
     __kernel_timespec ts{ .tv_sec = 1, .tv_nsec = 0 };
     while (pending_requests.load() > 0) {
-        log::sync().info("Pending requests: {}", pending_requests.load());
+        std::println("Waiting for {} pending requests to complete...", pending_requests.load());
 
         io_uring_cqe* cqe;
         int ret = io_uring_wait_cqe_timeout(&ring, &cqe, &ts);

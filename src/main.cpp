@@ -17,6 +17,7 @@ coro::task server_loop(net::ipv4);
 extern std::string_view default_path;
 int main(int argc, char* argv[]) {
     log::logger().set_enable(true);
+    log::logger().set_output_file("web_server.log");
     auto opts = opts::make_opts(
         opts::ruler::req_arg("--address", "-a"),
         opts::ruler::req_arg("--path", "-p")
@@ -39,8 +40,8 @@ int main(int argc, char* argv[]) {
                             std::terminate();
                         }
                     } else if (arg.long_name == "--path") {
-                        if (!std::filesystem::exists(arg.value) || !std::filesystem::is_directory(arg.value)) {
-                            std::println("Path does not exist or is not a directory: {}", arg.value);
+                        if (!std::filesystem::exists(arg.value) || !std::filesystem::is_directory(arg.value) || !std::filesystem::path(arg.value).is_absolute()) {
+                            std::println("Invalid path: {}. It must be an absolute path to an existing directory.", arg.value);
                             std::terminate();
                         }
                         default_path = arg.value;

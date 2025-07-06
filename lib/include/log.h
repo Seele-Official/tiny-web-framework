@@ -14,7 +14,9 @@
 #include <format>
 #include "coro/async.h"
 #include "meta.h"
-namespace seele::log{    
+namespace seele::log{  
+    constexpr bool default_enabled = true;
+
     enum class level {
         error,
         warn,
@@ -98,10 +100,12 @@ namespace seele::log{
         
         template<typename... args_t>
         void log(level lvl, std::format_string<args_t...> fmt, args_t&&... args){
-            if (!logger().enabled) return;
-            logger().log(
-                lvl, loc, now, fmt, std::forward<args_t>(args)...
-            );
+            if constexpr (default_enabled){
+                if (!logger().enabled) return;
+                logger().log(
+                    lvl, loc, now, fmt, std::forward<args_t>(args)...
+                );
+            }
         }
 
         template<typename... args_t>
@@ -143,11 +147,14 @@ namespace seele::log{
     struct async_agent : sync_agent{
         template<typename... args_t>
         void log(level lvl, std::format_string<std::decay_t<args_t>&...> fmt, args_t&&... args){
-            if (!logger().enabled) return;
-            seele::coro::async(
-                &logger_impl::log<std::decay_t<args_t>&...>,
-                std::ref(logger()), lvl, loc, now, fmt, std::forward<args_t>(args)...
-            );
+            if constexpr (default_enabled){
+                if (!logger().enabled) return;
+                seele::coro::async(
+                    &logger_impl::log<std::decay_t<args_t>&...>,
+                    std::ref(logger()), lvl, loc, now, fmt, std::forward<args_t>(args)...
+                );
+            }
+
         }
         template<typename... args_t>
         void error(std::format_string<std::decay_t<args_t>&...> fmt, args_t&&... args){

@@ -27,7 +27,7 @@ namespace seele::coro::thread {
 
     public:
         static auto& get_instance(){
-            static thread_pool_impl instance{2};
+            static thread_pool_impl instance{4};
             return instance;
         } 
 
