@@ -71,20 +71,6 @@ struct fd_wrapper {
     }
 };
 
-
-fd_wrapper setup_socket(net::ipv4 v4){
-    fd_wrapper fd_w = socket(PF_INET, SOCK_STREAM, 0);
-    sockaddr_in addr = v4.to_sockaddr_in();
-    if (bind(fd_w, (sockaddr*)&addr, sizeof(addr)) < 0) {
-        return fd_wrapper(-1);
-    }
-    if (listen(fd_w, SOMAXCONN) < 0) {
-        return fd_wrapper(-1);
-    }
-    return fd_w;
-}
-
-
 struct iovec_wrapper : iovec {
     iovec_wrapper(size_t len) : iovec{new std::byte[len], len} {}
     iovec_wrapper(iovec_wrapper&) = delete;
@@ -110,364 +96,6 @@ struct iovec_wrapper : iovec {
         }
     }
 };
-
-enum error_code{
-    bad_request = 400,
-    forbidden = 403,
-    not_found = 404,
-    method_not_allowed = 405,
-
-
-
-
-
-    internal_server_error = 500
-};
-
-struct error{
-    size_t index;
-    std::string_view str;
-};
-
-struct error_map{
-    std::array<std::string_view, 900> map;
-
-    template<typename ... args_t>
-    requires (std::is_same_v<std::decay_t<args_t>, error> && ...)
-    consteval error_map(args_t&&... args){
-        ((map[args.index] = args.str), ...);
-    }
-    auto operator[](error_code code) const -> std::string_view {
-        return map[static_cast<size_t>(code)];
-    }
-};
-
-error_map error_contents = {
-    error{
-        bad_request,
-        "HTTP/1.1 400 Bad Request\r\n"
-        "Content-Type: text/html; charset=utf-8\r\n"
-        "X-Content-Type-Options: nosniff\r\n"
-        "Connection: close\r\n"
-        "\r\n"
-        "<!DOCTYPE html>\n"
-        "<html>\n"
-        "<head>\n"
-        "    <title>400 Bad Request</title>\n"
-        "    <style>\n"
-        "        body { font-family: Arial, sans-serif; line-height: 1.6; margin: 0; padding: 20px; color: #333; }\n"
-        "        h1 { color: #d9534f; }\n"
-        "        .container { max-width: 800px; margin: 0 auto; }\n"
-        "        code { background: #f5f5f5; padding: 2px 4px; }\n"
-        "    </style>\n"
-        "</head>\n"
-        "<body>\n"
-        "    <div class=\"container\">\n"
-        "        <h1>400 Bad Request</h1>\n"
-        "        <p>Your client sent a malformed or illegal request.</p>\n"
-        "        <p>Possible causes:</p>\n"
-        "        <ul>\n"
-        "            <li>Invalid HTTP syntax</li>\n"
-        "            <li>Malformed headers</li>\n"
-        "            <li>Invalid query parameters</li>\n"
-        "        </ul>\n"
-        "        <hr>\n"
-        "    </div>\n"
-        "</body>\n"
-        "</html>"
-    },
-    error{
-        forbidden,
-        "HTTP/1.1 403 Forbidden\r\n"
-        "Content-Type: text/html; charset=utf-8\r\n"
-        "X-Content-Type-Options: nosniff\r\n"
-        "Connection: close\r\n"
-        "\r\n"
-        "<!DOCTYPE html>\n"
-        "<html>\n"
-        "<head>\n"
-        "    <title>403 Forbidden</title>\n"
-        "    <style>\n"
-        "        body { font-family: Arial, sans-serif; line-height: 1.6; margin: 0; padding: 20px; color: #333; }\n"
-        "        h1 { color: #d9534f; }\n"
-        "        .container { max-width: 800px; margin: 0 auto; }\n"
-        "    </style>\n"
-        "</head>\n"
-        "<body>\n"
-        "    <div class=\"container\">\n"
-        "        <h1>403 Forbidden</h1>\n"
-        "        <p>You don't have permission to access this resource.</p>\n"
-        "        <p>Possible reasons:</p>\n"
-        "        <ul>\n"
-        "            <li>Missing authentication credentials</li>\n"
-        "            <li>Insufficient permissions</li>\n"
-        "            <li>Path traversal attempt detected</li>\n"
-        "        </ul>\n"
-        "        <hr>\n"
-        "    </div>\n"
-        "</body>\n"
-        "</html>"    
-    },
-    error{
-        not_found,
-        "HTTP/1.1 404 Not Found\r\n"
-        "Content-Type: text/html; charset=utf-8\r\n"
-        "X-Content-Type-Options: nosniff\r\n"
-        "Connection: close\r\n"
-        "\r\n"
-        "<!DOCTYPE html>\n"
-        "<html>\n"
-        "<head>\n"
-        "    <title>404 Not Found</title>\n"
-        "    <style>\n"
-        "        body { font-family: Arial, sans-serif; line-height: 1.6; margin: 0; padding: 20px; color: #333; }\n"
-        "        h1 { color: #d9534f; }\n"
-        "        .container { max-width: 800px; margin: 0 auto; }\n"
-        "    </style>\n"
-        "</head>\n"
-        "<body>\n"
-        "    <div class=\"container\">\n"
-        "        <h1>404 Not Found</h1>\n"
-        "        <p>The requested resource was not found on this server.</p>\n"
-        "        <p>Suggestions:</p>\n"
-        "        <ul>\n"
-        "            <li>Check the URL for typos</li>\n"
-        "            <li>Navigate to the <a href=\"/\">home page</a></li>\n"
-        "        </ul>\n"
-        "        <hr>\n"
-        "    </div>\n"
-        "</body>\n"
-        "</html>"
-    },
-    error{
-        method_not_allowed,
-        "HTTP/1.1 405 Method Not Allowed\r\n"
-        "Content-Type: text/html; charset=utf-8\r\n"
-        "Allow: GET\r\n"
-        "X-Content-Type-Options: nosniff\r\n"
-        "Connection: close\r\n"
-        "\r\n"
-        "<!DOCTYPE html>\n"
-        "<html>\n"
-        "<head>\n"
-        "    <title>405 Method Not Allowed</title>\n"
-        "    <style>\n"
-        "        body { font-family: Arial, sans-serif; line-height: 1.6; margin: 0; padding: 20px; color: #333; }\n"
-        "        h1 { color: #d9534f; }\n"
-        "        .container { max-width: 800px; margin: 0 auto; }\n"
-        "    </style>\n"
-        "</head>\n"
-        "<body>\n"
-        "    <div class=\"container\">\n"
-        "        <h1>405 Method Not Allowed</h1>\n"
-        "        <p>The requested method is not supported for this resource.</p>\n"
-        "        <p>Allowed methods: <code>GET</code>, <code>HEAD</code></p>\n"
-        "        <hr>\n"
-        "    </div>\n"
-        "</body>\n"
-        "</html>"
-    },
-    error{
-        internal_server_error,
-        "HTTP/1.1 500 Internal Server Error\r\n"
-        "Content-Type: text/html; charset=utf-8\r\n"
-        "X-Content-Type-Options: nosniff\r\n"
-        "Connection: close\r\n"
-        "\r\n"
-        "<!DOCTYPE html>\n"
-        "<html>\n"
-        "<head>\n"
-        "    <title>500 Internal Server Error</title>\n"
-        "    <style>\n"
-        "        body { font-family: Arial, sans-serif; line-height: 1.6; margin: 0; padding: 20px; color: #333; }\n"
-        "        h1 { color: #d9534f; }\n"
-        "        .container { max-width: 800px; margin: 0 auto; }\n"
-        "        .error-details { \n"
-        "            background: #f8f9fa; \n"
-        "            border-left: 3px solid #d9534f;\n"
-        "            padding: 10px;\n"
-        "            margin: 15px 0;\n"
-        "            font-family: monospace;\n"
-        "            white-space: pre-wrap;\n"
-        "            display: none; /* 默认隐藏，可通过JS展开 */\n"
-        "        }\n"
-        "        .show-details { color: #0066cc; cursor: pointer; }\n"
-        "    </style>\n"
-        "    <script>\n"
-        "        function toggleDetails() {\n"
-        "            const el = document.getElementById('error-details');\n"
-        "            el.style.display = el.style.display === 'none' ? 'block' : 'none';\n"
-        "        }\n"
-        "    </script>\n"
-        "</head>\n"
-        "<body>\n"
-        "    <div class=\"container\">\n"
-        "        <h1>500 Internal Server Error</h1>\n"
-        "        <p>The server encountered an unexpected condition.</p>\n"
-        "        <p>Please try again later or contact the administrator.</p>\n"
-        "        \n"
-        "        <!-- 开发环境可显示错误详情 -->\n"
-        "        <span class=\"show-details\" onclick=\"toggleDetails()\">Show technical details</span>\n"
-        "        <div id=\"error-details\" class=\"error-details\">\n"
-        "            Error ID: #ERR_" /* 可动态插入错误ID或时间戳 */ "\n"
-        "            Timestamp: " /* 动态时间戳 */ "\n"
-        "        </div>\n"
-        "        \n"
-        "        <hr>\n"
-        "    </div>\n"
-        "</body>\n"
-        "</html>"   
-    }
-
-};
-
-
-struct send_http_error : io_link_timeout_awaiter<io_write_awaiter> {
-
-    send_http_error(int fd, error_code code) 
-        : io_link_timeout_awaiter<io_write_awaiter>{
-            io_write_awaiter{fd, error_contents[code].data(), meta::safe_cast<unsigned int>(error_contents[code].size())},
-            5s
-        } {}
-};
-
-int64_t get_file_size(const fd_wrapper& fd_w) {
-    struct stat st;
-
-    if(fstat(fd_w, &st) < 0) {
-        return -1;
-    }
-    if (S_ISBLK(st.st_mode)) {
-        int64_t bytes;
-        if (ioctl(fd_w, BLKGETSIZE64, &bytes) != 0) {
-            return -1;
-        }
-        return bytes;
-    } else if (S_ISREG(st.st_mode))
-        return st.st_size;
-
-    return -1;
-}
-
-
-
-
-
-std::string_view default_path = "./";
-
-
-std::unordered_map<std::string, std::string> mime_types = {
-    // Text and Web Files
-    {".html", "text/html"},
-    {".htm", "text/html"},
-    {".xhtml", "application/xhtml+xml"},
-    {".shtml", "text/html"},
-    {".txt", "text/plain"},
-    {".text", "text/plain"},
-    {".log", "text/plain"},
-    {".md", "text/markdown"},
-    {".markdown", "text/markdown"},
-    {".css", "text/css"},
-    {".csv", "text/csv"},
-    {".rtf", "text/rtf"},
-
-    // Scripts and Code
-    {".js", "application/javascript"},
-    {".mjs", "application/javascript"},
-    {".cjs", "application/javascript"},
-    {".json", "application/json"},
-    {".jsonld", "application/ld+json"},
-    {".xml", "application/xml"},
-    {".xsd", "application/xml"},
-    {".dtd", "application/xml-dtd"},
-    {".plist", "application/xml"},
-    {".yaml", "application/yaml"},
-    {".yml", "application/yaml"},
-
-    // Images
-    {".jpg", "image/jpeg"},
-    {".jpeg", "image/jpeg"},
-    {".jpe", "image/jpeg"},
-    {".jfif", "image/jpeg"},
-    {".pjpeg", "image/jpeg"},
-    {".pjp", "image/jpeg"},
-    {".png", "image/png"},
-    {".gif", "image/gif"},
-    {".bmp", "image/bmp"},
-    {".ico", "image/x-icon"},
-    {".cur", "image/x-icon"},
-    {".svg", "image/svg+xml"},
-    {".svgz", "image/svg+xml"},
-    {".webp", "image/webp"},
-    {".tiff", "image/tiff"},
-    {".tif", "image/tiff"},
-    {".psd", "image/vnd.adobe.photoshop"},
-
-    // Audio and Video
-    {".mp3", "audio/mpeg"},
-    {".ogg", "audio/ogg"},
-    {".wav", "audio/wav"},
-    {".weba", "audio/webm"},
-    {".aac", "audio/aac"},
-    {".flac", "audio/flac"},
-    {".mid", "audio/midi"},
-    {".midi", "audio/midi"},
-    {".mp4", "video/mp4"},
-    {".webm", "video/webm"},
-    {".ogv", "video/ogg"},
-    {".avi", "video/x-msvideo"},
-    {".mov", "video/quicktime"},
-    {".wmv", "video/x-ms-wmv"},
-    {".flv", "video/x-flv"},
-    {".mpeg", "video/mpeg"},
-    {".mpg", "video/mpeg"},
-
-    // Archives and Binary
-    {".zip", "application/zip"},
-    {".rar", "application/x-rar-compressed"},
-    {".7z", "application/x-7z-compressed"},
-    {".tar", "application/x-tar"},
-    {".gz", "application/gzip"},
-    {".bz2", "application/x-bzip2"},
-    {".xz", "application/x-xz"},
-    {".pdf", "application/pdf"},
-    {".doc", "application/msword"},
-    {".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
-    {".xls", "application/vnd.ms-excel"},
-    {".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
-    {".ppt", "application/vnd.ms-powerpoint"},
-    {".pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"},
-    {".odt", "application/vnd.oasis.opendocument.text"},
-    {".ods", "application/vnd.oasis.opendocument.spreadsheet"},
-    {".odp", "application/vnd.oasis.opendocument.presentation"},
-
-    // WebAssembly and Binary Data
-    {".wasm", "application/wasm"},
-    {".bin", "application/octet-stream"},
-    {".exe", "application/octet-stream"},
-    {".dll", "application/octet-stream"},
-    {".so", "application/octet-stream"},
-    {".dmg", "application/octet-stream"},
-    {".deb", "application/octet-stream"},
-    {".rpm", "application/octet-stream"},
-
-    // Fonts
-    {".woff", "font/woff"},
-    {".woff2", "font/woff2"},
-    {".ttf", "font/ttf"},
-    {".otf", "font/otf"},
-    {".eot", "application/vnd.ms-fontobject"},
-
-    // Miscellaneous
-    {".ics", "text/calendar"},
-    {".sh", "application/x-sh"},
-    {".php", "application/x-httpd-php"},
-    {".swf", "application/x-shockwave-flash"},
-    {".apk", "application/vnd.android.package-archive"},
-    {".torrent", "application/x-bittorrent"},
-    {".epub", "application/epub+zip"}
-};
-
 
 
 struct file_mmap{
@@ -509,14 +137,64 @@ struct file_mmap{
     }
 };
 
-std::unordered_map<std::string, file_mmap> file_caches;
-std::mutex file_caches_mutex;
+
+fd_wrapper setup_socket(net::ipv4 v4){
+    fd_wrapper fd_w = socket(PF_INET, SOCK_STREAM, 0);
+    sockaddr_in addr = v4.to_sockaddr_in();
+    if (bind(fd_w, (sockaddr*)&addr, sizeof(addr)) < 0) {
+        return fd_wrapper(-1);
+    }
+    if (listen(fd_w, SOMAXCONN) < 0) {
+        return fd_wrapper(-1);
+    }
+    return fd_w;
+}
+
+int64_t get_file_size(const fd_wrapper& fd_w) {
+    struct stat st;
+
+    if(fstat(fd_w, &st) < 0) {
+        return -1;
+    }
+    if (S_ISBLK(st.st_mode)) {
+        int64_t bytes;
+        if (ioctl(fd_w, BLKGETSIZE64, &bytes) != 0) {
+            return -1;
+        }
+        return bytes;
+    } else if (S_ISREG(st.st_mode))
+        return st.st_size;
+
+    return -1;
+}
+
+
+
+
+struct send_http_error : io_link_timeout_awaiter<io_write_awaiter> {
+    send_http_error(int fd, http::error_code code) 
+        : io_link_timeout_awaiter<io_write_awaiter>{
+            io_write_awaiter{fd, http::error_contents[code].data(), meta::safe_cast<unsigned int>(http::error_contents[code].size())},
+            5s
+        } {}
+};
+
+
+
+
+
+std::string_view default_path{};
+
+std::mutex file_caches_mutex{};
+std::unordered_map<std::string, file_mmap> file_caches{};
+
+
 struct get_res{
     iovec_wrapper header;
     iovec data;
 };
 
-std::expected<get_res, error_code> handle_get_req(const http::req_msg& req) {
+std::expected<get_res, http::error_code> handle_get_req(const http::req_msg& req) {
 
     std::filesystem::path uri_path = req.req_l.uri;
     if (uri_path.empty() || uri_path == "/") {
@@ -524,10 +202,10 @@ std::expected<get_res, error_code> handle_get_req(const http::req_msg& req) {
     }
     
     uri_path = uri_path.lexically_normal();
-    
+
 
     if (!uri_path.is_absolute() || 
-        uri_path.string().find("..") != std::string::npos) {        return std::unexpected{error_code::forbidden};
+        uri_path.string().find("..") != std::string::npos) { return std::unexpected{http::error_code::forbidden};
     }
     
 
@@ -535,45 +213,31 @@ std::expected<get_res, error_code> handle_get_req(const http::req_msg& req) {
     std::filesystem::path full_path = root_path / uri_path.relative_path();
     full_path = std::filesystem::weakly_canonical(full_path);
 
-
-    if (full_path.string().find(root_path.string()) != 0) {
-        return std::unexpected{error_code::forbidden};
-    }
-    
-
     if (std::filesystem::is_directory(full_path)) {
         full_path /= "index.html";
-        
-        if (!std::filesystem::exists(full_path)) {
-            return std::unexpected{error_code::not_found};
-        }
-    }
-    
-    if (!std::filesystem::exists(full_path)) {
-        return std::unexpected{error_code::not_found};
     }
 
-    if (std::filesystem::is_directory(full_path)) {
-        return std::unexpected{error_code::forbidden};
+    if (full_path.string().find(root_path.string()) != 0
+        || std::filesystem::is_directory(full_path)
+        || !std::filesystem::is_regular_file(full_path)
+        ) {
+        return std::unexpected{http::error_code::forbidden};
     }
 
-    if (!std::filesystem::is_regular_file(full_path)) {
-        return std::unexpected{error_code::forbidden};
-    }
 
     fd_wrapper file_fd_w(open(full_path.c_str(), O_RDONLY));
     if (!file_fd_w.is_valid()) {
         if (errno == EACCES || errno == EPERM) {
-            return std::unexpected{error_code::forbidden};
+            return std::unexpected{http::error_code::forbidden};
         }
-        return std::unexpected{error_code::not_found};
+        return std::unexpected{http::error_code::not_found};
     }
 
 
     int64_t file_size = get_file_size(file_fd_w);
     if (file_size < 0) {
         log::async().error("Failed to get file size for {}", full_path.string());
-        return std::unexpected{error_code::internal_server_error};
+        return std::unexpected{http::error_code::internal_server_error};
     }
 
     get_res res{
@@ -597,7 +261,7 @@ std::expected<get_res, error_code> handle_get_req(const http::req_msg& req) {
     std::string content_type = "application/octet-stream";
     std::string ext = full_path.extension().string();
 
-    if (auto it = mime_types.find(ext);it != mime_types.end()) {
+    if (auto it = http::mime_types.find(ext);it != http::mime_types.end()) {
         content_type = it->second;
     }
     
@@ -625,9 +289,6 @@ std::expected<get_res, error_code> handle_get_req(const http::req_msg& req) {
     return res;
 }
 
-
-
-std::list<auto (*)(const std::string&) -> bool> listeners = {};
 
 
 coro::task async_handle_connection(int fd, net::ipv4 addr) {
@@ -692,13 +353,13 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
                 }
                 break;
                 default: {
-                    co_await send_http_error{fd_w, error_code::method_not_allowed};
+                    co_await send_http_error{fd_w, http::error_code::method_not_allowed};
                     co_return;
                 }
             
             }
         } else {
-            co_await send_http_error{fd_w, error_code::bad_request};
+            co_await send_http_error{fd_w, http::error_code::bad_request};
             co_return;            
         }
 

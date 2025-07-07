@@ -11,6 +11,7 @@
 #include <thread>
 #include <type_traits>
 #include <stop_token>
+#include <cstring>
 
 constexpr size_t submit_threshold = 64;
 
@@ -63,18 +64,29 @@ private:
 template<typename sqe_handle_t>
     requires std::is_invocable_v<sqe_handle_t, io_uring_sqe*>
 bool io_ctx::submit(std::coroutine_handle<void> handle, io_uring_cqe* cqe, sqe_handle_t&& sqe_handle) {
-    std::lock_guard<std::mutex> lock(ring_m);
-    io_uring_sqe* sqe = io_uring_get_sqe(&ring);
-    if (!sqe) {
-        return false; 
+    {
+        std::lock_guard<std::mutex> lock(ring_m);
+        io_uring_sqe* sqe = io_uring_get_sqe(&ring);
+        if (!sqe) {
+            return false; 
+        }
+        sqe_handle(sqe);
+        sqe->user_data = std::bit_cast<std::uintptr_t>(new request{ cqe, handle });
     }
-    sqe_handle(sqe);
-    sqe->user_data = std::bit_cast<std::uintptr_t>(new request{ cqe, handle });
     this->unprocessed_sqe_count.fetch_add(1, std::memory_order_release);
     if (this->unprocessed_sqe_count.load(std::memory_order_acquire) >= submit_threshold) {
-        io_uring_submit(&ring);
-        this->pending_request_count.fetch_add(this->unprocessed_sqe_count.load(std::memory_order_acquire), std::memory_order_release);
-        this->unprocessed_sqe_count.store(0, std::memory_order_release);
+        int sum_submit = 0;
+        {
+            std::lock_guard<std::mutex> lock(ring_m);
+            sum_submit = io_uring_submit(&ring);
+        }
+        if (sum_submit >= 0){
+            this->pending_request_count.fetch_add(sum_submit, std::memory_order_release);
+            this->unprocessed_sqe_count.fetch_sub(sum_submit, std::memory_order_release);
+        } else {
+            std::print("io_uring_submit failed: {}\n", strerror(-sum_submit));
+            return false; 
+        }
     }
     return true;
 }
@@ -83,29 +95,41 @@ bool io_ctx::submit(std::coroutine_handle<void> handle, io_uring_cqe* cqe, sqe_h
 template<typename sqe_handle_t>
     requires std::is_invocable_v<sqe_handle_t, io_uring_sqe*>
 bool io_ctx::submit_and_link_timeout(std::coroutine_handle<void> handle, __kernel_timespec* time_out, io_uring_cqe* cqe, sqe_handle_t&& sqe_handle){
-    
-    std::lock_guard<std::mutex> lock(ring_m);
-    io_uring_sqe* sqe = io_uring_get_sqe(&ring);
-    if (!sqe) {
-        return false; 
-    }
-    sqe_handle(sqe);
-    sqe->user_data = std::bit_cast<std::uintptr_t>(new request{ cqe, handle });
-    sqe->flags |= IOSQE_IO_LINK;
+    {
+        std::lock_guard<std::mutex> lock(ring_m);
+        io_uring_sqe* sqe = io_uring_get_sqe(&ring);
+        if (!sqe) {
+            return false; 
+        }      
+        sqe_handle(sqe);
+        sqe->user_data = std::bit_cast<std::uintptr_t>(new request{ cqe, handle });
+        sqe->flags |= IOSQE_IO_LINK;
 
-    auto* timeout_sqe = io_uring_get_sqe(&ring);
-    if (!timeout_sqe) {
-        delete std::bit_cast<request*>(sqe->user_data);
-        return false; 
+        auto* timeout_sqe = io_uring_get_sqe(&ring);
+        if (!timeout_sqe) {
+            delete std::bit_cast<request*>(sqe->user_data);
+            return false; 
+        }
+        io_uring_prep_link_timeout(timeout_sqe, time_out, 0);
+        timeout_sqe->user_data = ETIMEDOUT;      
     }
-    io_uring_prep_link_timeout(timeout_sqe, time_out, 0);
-    timeout_sqe->user_data = ETIMEDOUT;
+
+
     this->unprocessed_sqe_count.fetch_add(2, std::memory_order_release);
 
     if (this->unprocessed_sqe_count.load(std::memory_order_acquire) >= submit_threshold) {
-        io_uring_submit(&ring);
-        this->pending_request_count.fetch_add(this->unprocessed_sqe_count.load(std::memory_order_acquire), std::memory_order_release);
-        this->unprocessed_sqe_count.store(0, std::memory_order_release);
+        int sum_submit = 0;
+        {
+            std::lock_guard<std::mutex> lock(ring_m);
+            sum_submit = io_uring_submit(&ring);
+        }
+        if (sum_submit >= 0){
+            this->pending_request_count.fetch_add(sum_submit, std::memory_order_release);
+            this->unprocessed_sqe_count.fetch_sub(sum_submit, std::memory_order_release);
+        } else {
+            std::print("io_uring_submit failed: {}\n", strerror(-sum_submit));
+            return false; 
+        }
     }
     return true;
 }

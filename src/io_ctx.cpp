@@ -8,7 +8,7 @@
 using namespace seele;
 
 void io_ctx::worker(std::stop_token stop_token){
-    __kernel_timespec ts{ .tv_sec = 0, .tv_nsec = 100'000'000 };
+    __kernel_timespec ts{ .tv_sec = 0, .tv_nsec = 50'000'000 };
 
     while (!stop_token.stop_requested()) {
 
@@ -16,12 +16,19 @@ void io_ctx::worker(std::stop_token stop_token){
         int ret = io_uring_wait_cqe_timeout(&ring, &cqe, &ts);
 
         if (ret == -ETIME) {
-            std::lock_guard<std::mutex> lock(ring_m);
-            if (this->unprocessed_sqe_count.load(std::memory_order_acquire) > 0) {
-                io_uring_submit(&ring);
-                log::async().info("Submitting {} unprocessed SQEs", this->unprocessed_sqe_count.load(std::memory_order_acquire));
-                this->pending_request_count.fetch_add(this->unprocessed_sqe_count.load(std::memory_order_acquire), std::memory_order_release);
-                this->unprocessed_sqe_count.store(0, std::memory_order_release);
+            if (this->unprocessed_sqe_count.load(std::memory_order_acquire) > 0 && this->unprocessed_sqe_count.load(std::memory_order_acquire) < submit_threshold) {   
+                int sum_submit = 0;
+                {
+                    std::lock_guard<std::mutex> lock(ring_m);
+                    sum_submit = io_uring_submit(&ring);
+                }
+                if (sum_submit >= 0){
+                    this->pending_request_count.fetch_add(sum_submit, std::memory_order_release);
+                    this->unprocessed_sqe_count.fetch_sub(sum_submit, std::memory_order_release);
+                    log::async().debug("Submitted {} SQEs", sum_submit);
+                } else {
+                    std::print("io_uring_submit failed: {}\n", strerror(-sum_submit));
+                }
             }
             continue;
         } else if (ret < 0) {

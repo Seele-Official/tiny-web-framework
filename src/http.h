@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include <format>
 #include <optional>
 #include <string>
@@ -59,9 +60,7 @@ namespace http {
         int64_t status_code;
         std::string version;
         std::string reason_phrase;
-        std::string toString() const {
-            return std::format("{} {} {}\r\n", version, status_code, reason_phrase);
-        }
+
         template<typename out_t>
         auto format_to(out_t&& out) const {
             return std::format_to(std::forward<out_t>(out), "{} {} {}\r\n", version, status_code, reason_phrase);
@@ -72,18 +71,7 @@ namespace http {
         stat_line stat_l;
         std::unordered_map<std::string, std::string> fields;
         std::optional<std::string> body;
-
-        std::string toString() const {
-            std::string res = stat_l.toString();
-            for (const auto& [key, value] : fields) {
-                res += std::format("{}: {}\r\n", key, value);
-            }
-            res += "\r\n";
-            if (body) {
-                res += *body;
-            }
-            return res;
-        }
+        
         template<typename out_t>
         auto format_to(out_t&& out) const {
             auto it = stat_l.format_to(std::forward<out_t>(out));
@@ -99,5 +87,39 @@ namespace http {
     };
 
 
+
+    enum class error_code : size_t{
+        bad_request = 400,
+        forbidden = 403,
+        not_found = 404,
+        method_not_allowed = 405,
+
+
+
+        internal_server_error = 500
+    };
+
+    struct error_content{
+        error_code code;
+        std::string_view str;
+    };
+
+    struct error_content_map{
+        std::array<std::string_view, 900> map;
+
+        consteval error_content_map(std::initializer_list<error_content> init_list) {
+            for (const auto& item : init_list) {
+                map[static_cast<size_t>(item.code)] = item.str;
+            }
+        }
+
+        auto operator[](error_code code) const -> std::string_view {
+            return map[static_cast<size_t>(code)];
+        }
+    };
+
+
+    extern error_content_map error_contents;
+    extern std::unordered_map<std::string, std::string> mime_types;
 }
 

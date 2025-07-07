@@ -217,9 +217,6 @@ namespace seele::structs {
             chunk_t* next = dummy->next.load(std::memory_order_acquire);
             hp.protect<HAZ_NEXT>(next);
 
-            if (next != dummy->next.load(std::memory_order_acquire))
-                continue;
-
             if (next == nullptr) {
                 hp.clear_all();
                 return std::nullopt;
