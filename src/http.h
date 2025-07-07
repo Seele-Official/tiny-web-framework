@@ -4,6 +4,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include "meta.h"
 #include "coro/co_task.h"
 #include "coro/task.h"
@@ -61,6 +62,10 @@ namespace http {
         std::string toString() const {
             return std::format("{} {} {}\r\n", version, status_code, reason_phrase);
         }
+        template<typename out_t>
+        auto format_to(out_t&& out) const {
+            return std::format_to(std::forward<out_t>(out), "{} {} {}\r\n", version, status_code, reason_phrase);
+        }
     };
 
     struct res_msg {
@@ -78,6 +83,18 @@ namespace http {
                 res += *body;
             }
             return res;
+        }
+        template<typename out_t>
+        auto format_to(out_t&& out) const {
+            auto it = stat_l.format_to(std::forward<out_t>(out));
+            for (const auto& [key, value] : fields) {
+                it = std::format_to(it, "{}: {}\r\n", key, value);
+            }
+            it = std::format_to(it, "\r\n");
+            if (body) {
+                it = std::format_to(it, "{}", *body);
+            }
+            return it;
         }
     };
 

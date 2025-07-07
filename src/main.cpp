@@ -17,7 +17,7 @@ coro::task server_loop(net::ipv4);
 extern std::string_view default_path;
 int main(int argc, char* argv[]) {
     log::logger().set_enable(true);
-    log::logger().set_output_file("web_server.log");
+    // log::logger().set_output_file("web_server.log");
     auto opts = opts::make_opts(
         opts::ruler::req_arg("--address", "-a"),
         opts::ruler::req_arg("--path", "-p")

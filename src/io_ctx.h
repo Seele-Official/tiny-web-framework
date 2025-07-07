@@ -11,6 +11,9 @@
 #include <thread>
 #include <type_traits>
 #include <stop_token>
+
+constexpr size_t submit_threshold = 64;
+
 class io_ctx{
 public:    
     io_ctx(const io_ctx&) = delete;
@@ -18,7 +21,7 @@ public:
     io_ctx& operator=(const io_ctx&) = delete;
     io_ctx& operator=(io_ctx&&) = delete;
 
-    io_ctx(uint32_t entries = 1024, uint32_t flags = 0) : max_entries{entries}, pending_requests{0} {
+    io_ctx(uint32_t entries = 1024, uint32_t flags = 0) : max_entries{entries}, pending_request_count{0}, unprocessed_sqe_count{0} {
         io_uring_queue_init(entries, &ring, flags);
     }
     ~io_ctx();
@@ -53,7 +56,8 @@ private:
     std::mutex ring_m;
     std::stop_source stop_src;
     const size_t max_entries;
-    std::atomic<size_t> pending_requests;
+    std::atomic<size_t> pending_request_count;
+    std::atomic<size_t> unprocessed_sqe_count;
 };
 
 template<typename sqe_handle_t>
@@ -66,8 +70,12 @@ bool io_ctx::submit(std::coroutine_handle<void> handle, io_uring_cqe* cqe, sqe_h
     }
     sqe_handle(sqe);
     sqe->user_data = std::bit_cast<std::uintptr_t>(new request{ cqe, handle });
-    io_uring_submit(&ring);
-    this->pending_requests.fetch_add(1, std::memory_order_relaxed);
+    this->unprocessed_sqe_count.fetch_add(1, std::memory_order_release);
+    if (this->unprocessed_sqe_count.load(std::memory_order_acquire) >= submit_threshold) {
+        io_uring_submit(&ring);
+        this->pending_request_count.fetch_add(this->unprocessed_sqe_count.load(std::memory_order_acquire), std::memory_order_release);
+        this->unprocessed_sqe_count.store(0, std::memory_order_release);
+    }
     return true;
 }
 
@@ -92,8 +100,12 @@ bool io_ctx::submit_and_link_timeout(std::coroutine_handle<void> handle, __kerne
     }
     io_uring_prep_link_timeout(timeout_sqe, time_out, 0);
     timeout_sqe->user_data = ETIMEDOUT;
+    this->unprocessed_sqe_count.fetch_add(2, std::memory_order_release);
 
-    io_uring_submit(&ring);
-    this->pending_requests.fetch_add(1, std::memory_order_relaxed);
+    if (this->unprocessed_sqe_count.load(std::memory_order_acquire) >= submit_threshold) {
+        io_uring_submit(&ring);
+        this->pending_request_count.fetch_add(this->unprocessed_sqe_count.load(std::memory_order_acquire), std::memory_order_release);
+        this->unprocessed_sqe_count.store(0, std::memory_order_release);
+    }
     return true;
 }

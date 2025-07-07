@@ -3,11 +3,12 @@
 #include "log.h"
 #include <atomic>
 #include <cstring>
+#include <mutex>
 #include <print>
 using namespace seele;
 
 void io_ctx::worker(std::stop_token stop_token){
-    __kernel_timespec ts{ .tv_sec = 5, .tv_nsec = 0};
+    __kernel_timespec ts{ .tv_sec = 0, .tv_nsec = 100'000'000 };
 
     while (!stop_token.stop_requested()) {
 
@@ -15,6 +16,13 @@ void io_ctx::worker(std::stop_token stop_token){
         int ret = io_uring_wait_cqe_timeout(&ring, &cqe, &ts);
 
         if (ret == -ETIME) {
+            std::lock_guard<std::mutex> lock(ring_m);
+            if (this->unprocessed_sqe_count.load(std::memory_order_acquire) > 0) {
+                io_uring_submit(&ring);
+                log::async().info("Submitting {} unprocessed SQEs", this->unprocessed_sqe_count.load(std::memory_order_acquire));
+                this->pending_request_count.fetch_add(this->unprocessed_sqe_count.load(std::memory_order_acquire), std::memory_order_release);
+                this->unprocessed_sqe_count.store(0, std::memory_order_release);
+            }
             continue;
         } else if (ret < 0) {
             log::async().error("io_uring_wait_cqe_timeout failed: {}", strerror(-ret));
@@ -22,6 +30,7 @@ void io_ctx::worker(std::stop_token stop_token){
         } else {
             if (cqe->user_data == ETIMEDOUT) {
                 io_uring_cqe_seen(&ring, cqe);
+                this->pending_request_count.fetch_sub(1, std::memory_order_release);
                 continue; // Timeout, skip this cqe
             }
 
@@ -33,15 +42,24 @@ void io_ctx::worker(std::stop_token stop_token){
             coro::thread::dispatch(req->handle);
             delete req;
             io_uring_cqe_seen(&ring, cqe);
-            this->pending_requests.fetch_sub(1, std::memory_order_release);
+            this->pending_request_count.fetch_sub(1, std::memory_order_release);
         }
     }
 }
 
 io_ctx::~io_ctx() {
     __kernel_timespec ts{ .tv_sec = 1, .tv_nsec = 0 };
-    while (pending_requests.load() > 0) {
-        std::println("Waiting for {} pending requests to complete...", pending_requests.load());
+    {
+        std::lock_guard<std::mutex> lock(ring_m);
+        if (this->unprocessed_sqe_count.load(std::memory_order_acquire) > 0) {
+            io_uring_submit(&ring);
+            std::println("Submitting {} unprocessed SQEs before shutdown", this->unprocessed_sqe_count.load(std::memory_order_acquire));
+            this->pending_request_count.fetch_add(this->unprocessed_sqe_count.load(std::memory_order_acquire), std::memory_order_release);
+            this->unprocessed_sqe_count.store(0, std::memory_order_release);
+        }
+    }
+    while (pending_request_count.load() > 0) {
+        std::println("Waiting for {} pending requests to complete...", pending_request_count.load());
 
         io_uring_cqe* cqe;
         int ret = io_uring_wait_cqe_timeout(&ring, &cqe, &ts);
@@ -54,6 +72,7 @@ io_ctx::~io_ctx() {
         } else {
             if (cqe->user_data == ETIMEDOUT) {
                 io_uring_cqe_seen(&ring, cqe);
+                this->pending_request_count.fetch_sub(1, std::memory_order_release);
                 continue; // Timeout, skip this cqe
             }
 
@@ -65,7 +84,7 @@ io_ctx::~io_ctx() {
             req->handle.destroy();
             delete req;
             io_uring_cqe_seen(&ring, cqe);
-            this->pending_requests.fetch_sub(1, std::memory_order_release);
+            this->pending_request_count.fetch_sub(1, std::memory_order_release);
         }
     }
     io_uring_queue_exit(&ring); 
