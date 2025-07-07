@@ -13,9 +13,18 @@ struct io_awaiter {
     io_uring_cqe cqe;
     bool await_ready() { return false; }
     void await_suspend(std::coroutine_handle<void> handle) {
-        io_ctx::get_instance().submit(handle, &cqe, [&](io_uring_sqe* sqe) {
-            static_cast<derived*>(this)->setup(sqe);
-        });
+        io_ctx::get_instance().submit(
+           new io_ctx::request{
+                handle,
+                &cqe,
+                false, 
+                nullptr, 
+                this, 
+                [](void* helper_ptr, io_uring_sqe* sqe) {
+                    static_cast<derived*>(helper_ptr)->setup(sqe);
+                }
+            } 
+        );
     }
     io_uring_cqe await_resume() { return cqe; }
 
@@ -109,9 +118,18 @@ struct io_link_timeout_awaiter {
     io_awaiter_t awaiter;
     bool await_ready() { return false; }
     void await_suspend(std::coroutine_handle<void> handle) {
-        io_ctx::get_instance().submit_and_link_timeout(handle, &ts, &awaiter.cqe, [&](io_uring_sqe* sqe) {
-            awaiter.setup(sqe);
-        });
+        io_ctx::get_instance().submit(
+            new io_ctx::request{
+                handle,
+                &awaiter.cqe,
+                true, 
+                &ts, 
+                &awaiter, 
+                [](void* helper_ptr, io_uring_sqe* sqe) {
+                    static_cast<io_awaiter_t*>(helper_ptr)->setup(sqe);
+                }
+            }
+        );
     }
     std::expected<io_uring_cqe, io_time_out_error> await_resume() { 
         if (awaiter.cqe.res == -ECANCELED) {

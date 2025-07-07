@@ -190,6 +190,7 @@ std::unordered_map<std::string, file_mmap> file_caches{};
 
 
 struct get_res{
+    std::string full_path;
     iovec_wrapper header;
     iovec data;
 };
@@ -204,8 +205,8 @@ std::expected<get_res, http::error_code> handle_get_req(const http::req_msg& req
     uri_path = uri_path.lexically_normal();
 
 
-    if (!uri_path.is_absolute() || 
-        uri_path.string().find("..") != std::string::npos) { return std::unexpected{http::error_code::forbidden};
+    if (!uri_path.is_absolute() || uri_path.string().find("..") != std::string::npos) {
+             return std::unexpected{http::error_code::forbidden};
     }
     
 
@@ -241,6 +242,7 @@ std::expected<get_res, http::error_code> handle_get_req(const http::req_msg& req
     }
 
     get_res res{
+        full_path.string(),
         {256},
         {}
     };
@@ -346,6 +348,7 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
                             log::async().error("Failed to send response");
                             co_return;
                         }
+                        log::async().info("successfully sent file {} to {}", get_res.value().full_path, client_addr.toString());
 
                     } else {
                         co_await send_http_error{fd_w, get_res.error()};

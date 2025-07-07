@@ -2,6 +2,12 @@
 
 namespace seele::coro::thread {
 
+    thread_pool_impl& thread_pool_impl::get_instance(){
+        static thread_pool_impl instance{4};
+        return instance;
+    } 
+
+
     void thread_pool_impl::worker(std::stop_token st){
         while(sem.acquire(), !st.stop_requested()){
             

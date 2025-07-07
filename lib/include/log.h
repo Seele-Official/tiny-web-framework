@@ -15,7 +15,7 @@
 #include "coro/async.h"
 #include "meta.h"
 namespace seele::log{  
-    constexpr bool default_enabled = true;
+    constexpr bool default_enabled = false;
 
     enum class level {
         error,
