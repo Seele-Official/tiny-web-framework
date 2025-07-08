@@ -1,182 +1,204 @@
 #include "http.h"
+#include <array>
+#include <expected>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <utility>
 #include <vector>
-#include <ranges>
-#include <algorithm>
-#include "coro_io.h"
+#include "coro/co_task.h"
+#include "meta.h"
+#include "math.h"
 namespace http {
     using std::literals::operator""s;
     using std::literals::operator""ms;
-    coro::co_task<std::optional<parse_res>, std::string_view> req_msg::parser() {
-        enum class parse_state {
-            REQUEST_LINE,
-            HEADERS,
-            BODY,
-            DONE
-        };
 
-        parse_state state = parse_state::REQUEST_LINE;
-        req_msg message;
-        size_t content_length = 0;
-        std::string body_builder;
-        std::string_view buffer;
-        size_t start_pos = 0;  
+    constexpr std::array<bool, 256> gen_tchar_map(){
+        std::array<bool, 256> tchar_map{};
+        for (auto& c :"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&'*+-.^_`|~"){
+            tchar_map[static_cast<unsigned char>(c)] = true;
+        }
+        return tchar_map;
+    }
+
+    bool is_tchar(char c) {
+        static constexpr std::array<bool, 256> tchar_map = gen_tchar_map();
+        return tchar_map[static_cast<unsigned char>(c)];
+    }
 
 
-        co_wait_message buffer;
+    constexpr char CR = '\r';
+    constexpr char LF = '\n';
+    constexpr char SP = ' ';
+    constexpr char HTAB = '\t';
 
+    constexpr std::string_view CRLF = "\r\n";
+
+
+    std::vector<std::string_view> split_string_view(std::string_view str, std::string_view delimiter) {
+        std::vector<std::string_view> result;
+        size_t pos = 0;
         while (true) {
-            switch (state) {
-                case parse_state::REQUEST_LINE: {
-                    // 查找请求行结束位置
-                    size_t line_end = buffer.find("\r\n", start_pos);
-                    if (line_end == std::string_view::npos) {
-                        // 保存未解析数据位置并等待更多数据
-                        start_pos = buffer.size();
-                        co_wait_message buffer;
-                        continue;
-                    }
+            size_t next_pos = str.find(delimiter, pos);
+            if (next_pos == std::string_view::npos) {
+                result.push_back(str.substr(pos));
+                break;
+            }
+            result.push_back(str.substr(pos, next_pos - pos));
+            pos = next_pos + delimiter.size();
+        }
+        return result;
+    }
+    std::vector<std::string_view> split_string_view(std::string_view str, char delimiter) {
+        std::vector<std::string_view> result;
+        size_t pos = 0;
+        while (true) {
+            size_t next_pos = str.find(delimiter, pos);
+            if (next_pos == std::string_view::npos) {
+                result.push_back(str.substr(pos));
+                break;
+            }
+            result.push_back(str.substr(pos, next_pos - pos));
+            pos = next_pos + 1;
+        }
+        return result;
+    }
 
-                    // 提取请求行
-                    std::string_view request_line = buffer.substr(start_pos, line_end - start_pos);
-                    start_pos = line_end + 2;  // 跳过\r\n
+    template <typename lambda_t>
+        requires std::is_same_v<bool, std::invoke_result_t<lambda_t, char>>
+    std::string_view parse_token(std::string_view str, lambda_t&& is_valid) {
+        size_t end = 0;
 
-                    // 分割方法、路径和版本
-                    std::vector<std::string_view> parts;
-                    size_t last = 0;
-                    for (size_t i = 0; i <= request_line.size(); ++i) {
-                        if (i == request_line.size() || std::isspace(request_line[i])) {
-                            if (i - last > 0) {
-                                parts.push_back(request_line.substr(last, i - last));
-                            }
-                            last = i + 1;
-                        }
-                    }
-
-                    // 验证请求行格式
-                    if (parts.size() != 3) {
-                        co_return std::nullopt;
-                    }
-
-                    // 解析HTTP方法
-                    auto method_opt = meta::enum_from_string<req_line::method_t>(parts[0]);
-                    if (!method_opt) {
-                        co_return std::nullopt;
-                    }
-
-                    // 存储请求行信息
-                    message.req_l = {
-                        *method_opt,
-                        std::string(parts[1]),
-                        std::string(parts[2])
-                    };
-                    state = parse_state::HEADERS;
-                    break;
-                }
-
-                case parse_state::HEADERS: {
-                    while (true) {
-                        // 查找头部行结束位置
-                        size_t line_end = buffer.find("\r\n", start_pos);
-                        if (line_end == std::string_view::npos) {
-                            start_pos = buffer.size();
-                            co_wait_message buffer;
-                            continue;
-                        }
-
-                        // 检查是否到达头部结束（空行）
-                        if (line_end == start_pos) {
-                            start_pos = line_end + 2;  // 跳过空行
-                            state = parse_state::BODY;
-                            break;
-                        }
-
-                        // 提取单行头部
-                        std::string_view header_line = buffer.substr(start_pos, line_end - start_pos);
-                        start_pos = line_end + 2;  // 跳过\r\n
-
-                        // 分割键值对
-                        size_t colon_pos = header_line.find(':');
-                        if (colon_pos == std::string_view::npos) {
-                            co_return std::nullopt;
-                        }
-
-                        // 提取并规范化键
-                        std::string_view key = header_line.substr(0, colon_pos);
-                        while (!key.empty() && std::isspace(key.back())) {
-                            key.remove_suffix(1);
-                        }
-
-                        // 提取并清理值
-                        std::string_view value = header_line.substr(colon_pos + 1);
-                        while (!value.empty() && std::isspace(value.front())) {
-                            value.remove_prefix(1);
-                        }
-                        while (!value.empty() && std::isspace(value.back())) {
-                            value.remove_suffix(1);
-                        }
-
-                        // 存储头部字段
-                        message.fields.emplace(key, value);
-
-                        // 记录Content-Length
-                        if (key == "Content-Length") {
-                            auto [ptr, ec] = std::from_chars(
-                                value.data(), 
-                                value.data() + value.size(), 
-                                content_length
-                            );
-                            if (ec != std::errc() || ptr != value.data() + value.size()) {
-                                co_return std::nullopt;
-                            }
-                        }
-                    }
-                    break;
-                }
-
-                case parse_state::BODY: {
-                    // 无内容主体的情况
-                    if (content_length == 0) {
-                        state = parse_state::DONE;
-                        break;
-                    }
-
-                    // 计算剩余需要读取的字节数
-                    size_t remaining = content_length - body_builder.size();
-                    size_t available = buffer.size() - start_pos;
-
-                    // 复制可用数据到主体构建器
-                    if (available > 0) {
-                        size_t to_copy = std::min(remaining, available);
-                        body_builder.append(buffer.data() + start_pos, to_copy);
-                        start_pos += to_copy;
-                        remaining -= to_copy;
-                    }
-
-                    // 检查是否完成主体读取
-                    if (remaining == 0) {
-                        message.body = std::move(body_builder);
-                        state = parse_state::DONE;
-                    } else {
-                        co_wait_message buffer;
-                    }
-                    break;
-                }
-
-                case parse_state::DONE: {
-                    // 准备返回结果
-                    parse_res result{
-                        std::move(message),
-                        std::nullopt  
-                    };
-                    // 处理剩余数据
-                    if (start_pos < buffer.size()) {
-                        result.remain = buffer.substr(start_pos);
-                    }
-
-                    co_return result;
-                }
+        for (auto c:str){
+            if (is_valid(c)) {
+                end++;
+            } else {
+                break;
             }
         }
+        return str.substr(0, end);
+    }
+
+    std::string_view trim_string_view(std::string_view str) {
+        size_t start = 0;
+        while (start < str.size() && (str[start] == SP || str[start] == HTAB)) {
+            ++start;
+        }
+        size_t end = str.size();
+        while (end > start && (str[end - 1] == SP || str[end - 1] == HTAB)) {
+            --end;
+        }
+        return str.substr(start, end - start);
+    }
+
+    coro::co_task<std::optional<parse_res>, std::string_view> req_msg::parser() {
+        req_msg message;
+
+        std::string_view data;
+        co_wait_message data;
+
+
+        std::string line_buffer{};
+        std::string_view line_view{};
+
+        #define get_line()                                                              \
+        if (auto line_end = data.find(CRLF); line_end != std::string_view::npos){       \
+            line_view = data.substr(0, line_end);                                       \
+            data.remove_prefix(line_end + CRLF.size());                                 \
+        } else {                                                                        \
+            line_buffer.append(data);                                                   \
+            while (true) {                                                              \
+                co_wait_message data;                                                   \
+                auto line_end = data.find(CRLF);                                        \
+                if (line_end == std::string_view::npos) {                               \
+                    /*If we don't find a complete line, wait for more data*/            \
+                    line_buffer.append(data);                                           \
+                } else {                                                                \
+                    line_buffer.append(data.substr(0, line_end));                       \
+                    data.remove_prefix(line_end + CRLF.size());                         \
+                    line_view = line_buffer;                                            \
+                    break;                                                              \
+                }                                                                       \
+            }                                                                           \
+        }
+
+        // Parse request line
+        get_line()
+
+        auto req_line_parts = split_string_view(line_view, SP);
+        if (req_line_parts.size() != 3) {
+            co_return std::nullopt;
+        }
+        auto method_opt = meta::enum_from_string<method_t>(req_line_parts[0]);
+        if (!method_opt) {
+            co_return std::nullopt;
+        }
+
+        message.req_l = {
+            *method_opt,
+            std::string(req_line_parts[1]),
+            std::string(req_line_parts[2])
+        };
+
+        line_buffer.clear();
+
+
+        // Parse headers
+        while (true) {
+            if (data.starts_with(CRLF)) {
+                data.remove_prefix(CRLF.size());
+                break;
+            }
+            get_line()
+            auto key = parse_token(line_view, is_tchar);
+            line_view.remove_prefix(key.size());
+            if (key.empty()) {
+                co_return std::nullopt;
+            }
+            if (line_view.empty() || line_view.front() != ':') {
+                co_return std::nullopt; // Invalid header format
+            }
+            line_view.remove_prefix(1); // Skip ':'
+
+            auto value = parse_token(line_view, [](char c){return is_tchar(c) || c == ' ';});
+            line_view.remove_prefix(value.size());
+            if (value.empty()) {
+                co_return std::nullopt; // Invalid header format
+            }
+
+            message.fields.emplace(trim_string_view(key), trim_string_view(value));
+            line_buffer.clear();
+        }
+
+        // Parse body if Content-Length is present
+        std::string body_buffer;
+        if(auto content_length_it = message.fields.find("Content-Length"); content_length_it != message.fields.end()) {
+            if (auto res = math::stoi(content_length_it->second); res.has_value()){
+                size_t content_length = res.value();
+                if (content_length > 0) {
+                    if (data.size() < content_length) {
+                        // Not enough data for body, wait for more
+                        body_buffer.append(data);
+                        co_wait_message data;
+                    }
+                    message.body = std::move(body_buffer);
+                    data.remove_prefix(content_length);
+                } else {
+                    message.body = std::nullopt; // No body
+                }
+            } else {
+                co_return std::nullopt; // Invalid Content-Length value
+            }
+        } else {
+            message.body = std::nullopt;
+        }
+
+        co_return parse_res{
+            std::move(message),
+            data.empty() ? std::nullopt : std::make_optional(data)
+        };
+
     }
 
 

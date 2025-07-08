@@ -42,7 +42,7 @@ namespace seele::structs {
             node_t* next = dummy->next.load(std::memory_order_acquire);
 
             if (next == nullptr) {
-                return nullptr;
+                continue;
             }
 
             // if tail is behind, try to update it

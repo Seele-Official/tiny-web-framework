@@ -40,4 +40,4 @@ After building, you can run the server:
 ./web_server -a 127.0.0.1:8080 -p /home/seele/webserver/static
 ```
 
-The server will listen for HTTP requests on the specified port (adjustable in the configuration). For further configuration, please refer to the code comments and configuration files within the repository.
+The server will listen for HTTP requests on the specified port.

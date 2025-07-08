@@ -13,33 +13,36 @@ using namespace seele;
 
 
 namespace http {
-    struct parse_res;   
-     
+       
+    
+    enum method_t {
+        GET,
+        POST,
+        PUT,
+        DELETE,
+        HEAD,
+        OPTIONS,
+        PATCH,
+        CONNECT,
+        TRACE
+    };     
+
+
     struct req_line {
-        enum method_t {
-            GET,
-            POST,
-            PUT,
-            DELETE,
-            HEAD,
-            OPTIONS,
-            PATCH,
-            CONNECT,
-            TRACE
-        };
+
         method_t method;
         std::string uri;
         std::string version;
-        std::string toString(){
-            return std::format(
-                "{} {} {}\r\n",
-                meta::enum_to_string(method),
-                uri,
-                version
-            );
+        
+        template<typename out_t>
+        auto format_to(out_t&& out) const {
+            return std::format_to(std::forward<out_t>(out), "{} {} {}\r\n", 
+                meta::enum_to_string(method), uri, version);
         }
 
     };
+    
+    struct parse_res;
     struct req_msg {
 
         req_line req_l;

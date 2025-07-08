@@ -1,172 +1,25 @@
-#include <algorithm>
-#include <bits/types/struct_iovec.h>
-#include <chrono>
 #include <cstdint>
 #include <cstring>
-#include <exception>
 #include <expected>
 #include <format>
 #include <mutex>
 #include <optional>
-#include <print>
 #include <string>
 #include <string_view>
 #include <cstddef>
 #include <unordered_map>
-#include <utility>
-#include <vector>
 #include <filesystem>
 
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/ioctl.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <sys/types.h>
-#include <sys/sendfile.h>
-#include <sys/mman.h>
 
 #include "meta.h"
-#include "net/ipv4.h"
 #include "coro/task.h"
-#include "coro/async.h"
 #include "log.h"
 #include "http.h"
 #include "coro_io.h"
+#include "io.h"
+
 using std::literals::operator""s;
 using std::literals::operator""ms;
-
-
-struct fd_wrapper {
-    int fd;
-    fd_wrapper(int fd) : fd(fd) {}
-    fd_wrapper(fd_wrapper&) = delete;
-    fd_wrapper(fd_wrapper&& other) noexcept : fd(other.fd) {
-        other.fd = -1; // Prevent the destructor from closing the fd
-    }
-    fd_wrapper& operator=(fd_wrapper&) = delete;
-    fd_wrapper& operator=(fd_wrapper&& other) noexcept {
-        if (this != &other) {
-            if (is_valid()) {
-                close(fd);
-            }
-            fd = other.fd;
-            other.fd = -1; // Prevent the destructor from closing the fd
-        }
-        return *this;
-    }
-    operator int() const {
-        return fd;
-    }
-
-    bool is_valid() const {
-        return fd >= 0;
-    }
-    ~fd_wrapper() {
-        if (is_valid()) {
-            close(fd);
-        }
-    }
-};
-
-struct iovec_wrapper : iovec {
-    iovec_wrapper(size_t len) : iovec{new std::byte[len], len} {}
-    iovec_wrapper(iovec_wrapper&) = delete;
-    iovec_wrapper(iovec_wrapper&& other) noexcept : iovec{other.iov_base, other.iov_len} {
-        other.iov_base = nullptr;
-        other.iov_len = 0;
-    }
-    iovec_wrapper& operator=(iovec_wrapper&) = delete;
-    iovec_wrapper& operator=(iovec_wrapper&& other) noexcept {
-        if (this != &other) {
-            delete[] static_cast<std::byte*>(iov_base);
-            iov_base = other.iov_base;
-            iov_len = other.iov_len;
-            other.iov_base = nullptr;
-            other.iov_len = 0;
-        }
-        return *this;
-    }
-
-    ~iovec_wrapper() {
-        if (iov_base){
-            delete[] static_cast<std::byte*>(iov_base);
-        }
-    }
-};
-
-
-struct file_mmap{
-    size_t size;
-    void* data;
-    file_mmap(size_t length, int prot = PROT_READ | PROT_WRITE,
-                      int flags = MAP_SHARED | MAP_ANONYMOUS, int fd = -1,
-                      off_t offset = 0) : size(length), data(mmap(nullptr, length, prot, flags, fd, offset)) {
-        if (data == MAP_FAILED) {
-            std::println("Failed to mmap file: {}", strerror(errno));
-            std::terminate();
-        }
-    }
-
-    file_mmap(const file_mmap&) = delete;
-    file_mmap(file_mmap&& other) noexcept : size(other.size), data(other.data) {
-        other.data = nullptr;
-        other.size = 0;
-    }
-    file_mmap& operator=(file_mmap&& other) noexcept {
-        if (this != &other) {
-            if (data) {
-                munmap(data, size);
-            }
-            size = other.size;
-            data = other.data;
-            other.data = nullptr;
-            other.size = 0;
-        }
-        return *this;
-    }
-
-    file_mmap& operator=(const file_mmap&) = delete;
-
-    ~file_mmap(){
-        if (data) {
-            munmap(data, size);
-        }
-    }
-};
-
-
-fd_wrapper setup_socket(net::ipv4 v4){
-    fd_wrapper fd_w = socket(PF_INET, SOCK_STREAM, 0);
-    sockaddr_in addr = v4.to_sockaddr_in();
-    if (bind(fd_w, (sockaddr*)&addr, sizeof(addr)) < 0) {
-        return fd_wrapper(-1);
-    }
-    if (listen(fd_w, SOMAXCONN) < 0) {
-        return fd_wrapper(-1);
-    }
-    return fd_w;
-}
-
-int64_t get_file_size(const fd_wrapper& fd_w) {
-    struct stat st;
-
-    if(fstat(fd_w, &st) < 0) {
-        return -1;
-    }
-    if (S_ISBLK(st.st_mode)) {
-        int64_t bytes;
-        if (ioctl(fd_w, BLKGETSIZE64, &bytes) != 0) {
-            return -1;
-        }
-        return bytes;
-    } else if (S_ISREG(st.st_mode))
-        return st.st_size;
-
-    return -1;
-}
 
 
 
@@ -185,8 +38,8 @@ struct send_http_error : io_link_timeout_awaiter<io_write_awaiter> {
 
 std::string_view default_path{};
 
-std::mutex file_caches_mutex{};
-std::unordered_map<std::string, file_mmap> file_caches{};
+static std::mutex file_caches_mutex{};
+static std::unordered_map<std::string, file_mmap> file_caches{};
 
 
 struct get_res{
@@ -331,10 +184,9 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
             remain = remain_opt;
 
             switch (msg.req_l.method) {
-                case http::req_line::method_t::GET: {
+                case http::method_t::GET: {
                     auto get_res = handle_get_req(msg);
                     if (get_res.has_value()) {
-
                         auto res = co_await io_link_timeout_awaiter{
                             io_writev_awaiter{
                                 fd_w,
@@ -362,6 +214,7 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
             
             }
         } else {
+            log::async().error("Failed to parse request from {}", client_addr.toString());
             co_await send_http_error{fd_w, http::error_code::bad_request};
             co_return;            
         }

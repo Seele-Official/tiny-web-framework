@@ -1,20 +1,17 @@
 #pragma once
-#include "structs/ms_queue_chunk.h"
+
 #include <atomic>
 #include <coroutine>
 #include <cstddef>
-#include <mutex>
-#include <bit>
 #include <liburing.h>
 #include <cstdint>
-#include <errno.h>
-#include <print>
 #include <semaphore>
 #include <thread>
 #include <type_traits>
 #include <stop_token>
 #include <cstring>
-
+#include "structs/ms_queue_chunk.h"
+#include "structs/object_pool.h"
 constexpr size_t submit_threshold = 64;
 
 class io_ctx{
@@ -32,7 +29,7 @@ public:
     io_ctx& operator=(const io_ctx&) = delete;
     io_ctx& operator=(io_ctx&&) = delete;
 
-    io_ctx(uint32_t entries = 1024, uint32_t flags = 0) : unp_sem{0}, max_entries{entries}, pending_sqe_count{0}{
+    io_ctx(uint32_t entries = 1024, uint32_t flags = 0) : max_entries{entries}, pending_sqe_count{0}, unp_sem{0}{
         this->worker_thread = std::jthread([&] (std::stop_token st) { worker(st); });
         io_uring_queue_init(entries, &ring, flags);
     }
@@ -58,12 +55,11 @@ public:
 private:    
     io_uring ring;
     std::stop_source stop_src;
-    
-
-    std::counting_semaphore<> unp_sem;
-    seele::structs::ms_queue_chunk<request*> unprocessed_requests;
-    std::jthread worker_thread;
+    std::jthread worker_thread; 
 
     const size_t max_entries;
     std::atomic<size_t> pending_sqe_count;
+
+    std::counting_semaphore<> unp_sem;
+    seele::structs::ms_queue_chunk<request*> unprocessed_requests;
 };

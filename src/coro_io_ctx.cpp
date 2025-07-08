@@ -1,10 +1,6 @@
-#include "io_ctx.h"
+#include "coro_io_ctx.h"
 #include "coro/threadpool.h"
 #include "log.h"
-#include <atomic>
-#include <cstddef>
-#include <cstring>
-#include <mutex>
 #include <print>
 using namespace seele;
 using std::chrono::operator""ms;
@@ -69,15 +65,7 @@ void io_ctx::worker(std::stop_token st){
         }
     }    
     
-    while (true) {
-        auto ret = unprocessed_requests.pop_front();
-        if (!ret.has_value()) {
-            break; // No more requests to process
-        }
-        auto* req = ret.value();
-        req->handle.destroy();
-        delete req;
-    }
+
 }
 
 
@@ -113,6 +101,15 @@ void io_ctx::listener(std::stop_token st){
         }
     }
 
+    while (true) {
+        auto ret = unprocessed_requests.pop_front();
+        if (!ret.has_value()) {
+            break; // No more requests to process
+        }
+        auto* req = ret.value();
+        req->handle.destroy();
+        delete req;
+    }
 }
 
 io_ctx::~io_ctx() {
