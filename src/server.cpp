@@ -1,3 +1,6 @@
+#include "server.h"
+
+
 #include <cstdint>
 #include <cstring>
 #include <expected>
@@ -5,11 +8,11 @@
 #include <mutex>
 #include <optional>
 #include <string>
-#include <string_view>
 #include <cstddef>
+#include <string_view>
 #include <unordered_map>
 #include <filesystem>
-
+#include <csignal>
 
 #include "meta.h"
 #include "coro/task.h"
@@ -17,133 +20,168 @@
 #include "http.h"
 #include "coro_io.h"
 #include "io.h"
+#include "net/ipv4.h"
 
 using std::literals::operator""s;
 using std::literals::operator""ms;
 
+using namespace seele;
+
+namespace env {
+    static std::filesystem::path root_path = std::filesystem::current_path() / "www";
+    static net::ipv4 addr;
+    static fd_wrapper fd_w;
+}
+
+
+namespace file_cache {
+    static std::mutex mutex{};
+    static std::unordered_map<std::string, file_mmap> files{};
+
+    std::expected<iovec, http::error_code> get(std::filesystem::path path) {
+        auto full_path = std::filesystem::absolute(path);
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+
+            if (auto it = files.find(full_path.string());it != files.end()) {
+
+                return iovec{
+                    it->second.data,
+                    it->second.size
+                };
+
+            } else {
+                fd_wrapper file_fd_w(open(full_path.c_str(), O_RDONLY));
+                if (!file_fd_w.is_valid()) {
+                    if (errno == EACCES || errno == EPERM) {
+                        return std::unexpected{http::error_code::forbidden};
+                    }
+                    return std::unexpected{http::error_code::not_found};
+                }
+
+
+                int64_t file_size = get_file_size(file_fd_w);
+                if (file_size < 0) {
+                    log::async().error("Failed to get file size for {}", full_path.string());
+                    return std::unexpected{http::error_code::internal_server_error};
+                }
+
+                file_mmap f(file_size, PROT_READ, MAP_SHARED, file_fd_w, 0);
+                
+                iovec i{
+                    f.data,
+                    f.size
+                };
+
+                files.emplace(full_path.string(), std::move(f));
+                return i;
+            }
+        }
 
 
 
-struct send_http_error : io_link_timeout_awaiter<io_write_awaiter> {
-    send_http_error(int fd, http::error_code code) 
-        : io_link_timeout_awaiter<io_write_awaiter>{
-            io_write_awaiter{fd, http::error_contents[code].data(), meta::safe_cast<unsigned int>(http::error_contents[code].size())},
-            5s
-        } {}
-};
+
+    }
+
+}
 
 
 
 
-
-std::string_view default_path{};
-
-static std::mutex file_caches_mutex{};
-static std::unordered_map<std::string, file_mmap> file_caches{};
-
-
-struct get_res{
-    std::string full_path;
+struct http_file_ctx{
     iovec_wrapper header;
     iovec data;
+    static http_file_ctx make(const http::res_msg& msg, void* file, size_t size) {
+        http_file_ctx res{
+            {256},
+            {file, size}
+        };
+        auto it = msg.format_to(static_cast<char*>(res.header.iov_base));
+        res.header.iov_len = meta::safe_cast<size_t>(it - static_cast<char*>(res.header.iov_base));
+        return res;
+    }
 };
 
-std::expected<get_res, http::error_code> handle_get_req(const http::req_msg& req) {
+std::expected<http_file_ctx, http::error_code> handle_get_req(const http::req_msg& req) {
 
-    std::filesystem::path uri_path = req.req_l.uri;
-    if (uri_path.empty() || uri_path == "/") {
-        uri_path = "/index.html";
+    auto origin = std::get_if<http::origin_form>(&req.line.target);
+    if (!origin) {
+        return std::unexpected{http::error_code::not_implemented};
     }
-    
-    uri_path = uri_path.lexically_normal();
 
+    std::filesystem::path origin_path = origin->path;
+    std::filesystem::path full_path = env::root_path / origin_path.relative_path();
 
-    if (!uri_path.is_absolute() || uri_path.string().find("..") != std::string::npos) {
-             return std::unexpected{http::error_code::forbidden};
+    std::filesystem::path rel = full_path.lexically_relative(env::root_path);
+
+    if (rel.empty() || *rel.begin() == ".."){
+        log::async().error("Attempted to access outside of root path: {}", full_path.string());
+        return std::unexpected{http::error_code::forbidden};
     }
-    
-
-    std::filesystem::path root_path(default_path);
-    std::filesystem::path full_path = root_path / uri_path.relative_path();
-    full_path = std::filesystem::weakly_canonical(full_path);
 
     if (std::filesystem::is_directory(full_path)) {
         full_path /= "index.html";
     }
 
-    if (full_path.string().find(root_path.string()) != 0
-        || std::filesystem::is_directory(full_path)
-        || !std::filesystem::is_regular_file(full_path)
-        ) {
-        return std::unexpected{http::error_code::forbidden};
-    }
+    if(auto ctx = file_cache::get(full_path);!ctx.has_value()){
+        return std::unexpected{ctx.error()};
+    } else {
 
+        std::string content_type = "application/octet-stream";
+        std::string ext = full_path.extension().string();
 
-    fd_wrapper file_fd_w(open(full_path.c_str(), O_RDONLY));
-    if (!file_fd_w.is_valid()) {
-        if (errno == EACCES || errno == EPERM) {
-            return std::unexpected{http::error_code::forbidden};
+        if (auto it = http::mime_types.find(ext);it != http::mime_types.end()) {
+            content_type = it->second;
         }
-        return std::unexpected{http::error_code::not_found};
+        return http_file_ctx::make(
+            {
+                {200, "OK"},
+                {
+                    {"Content-Type", content_type},
+                    {"X-Content-Type-Options", "nosniff"},
+                    {"Content-Length", std::to_string(ctx.value().iov_len)},
+                },
+                std::nullopt
+            }, 
+            ctx.value().iov_base, 
+            ctx.value().iov_len
+        );
     }
-
-
-    int64_t file_size = get_file_size(file_fd_w);
-    if (file_size < 0) {
-        log::async().error("Failed to get file size for {}", full_path.string());
-        return std::unexpected{http::error_code::internal_server_error};
-    }
-
-    get_res res{
-        full_path.string(),
-        {256},
-        {}
-    };
-    {
-        std::lock_guard<std::mutex> lock(file_caches_mutex);
-        auto it = file_caches.find(full_path.string());
-        if (it != file_caches.end()) {
-            res.data.iov_base = it->second.data;
-            res.data.iov_len = it->second.size;
-        } else {
-            file_caches.emplace(
-                full_path.string(),
-                file_mmap(file_size, PROT_READ, MAP_SHARED, file_fd_w, 0)
-            );
-        }
-    }
-
-    std::string content_type = "application/octet-stream";
-    std::string ext = full_path.extension().string();
-
-    if (auto it = http::mime_types.find(ext);it != http::mime_types.end()) {
-        content_type = it->second;
-    }
-    
-
-    http::res_msg res_msg{
-        {
-            .status_code = 200,
-            .version = "HTTP/1.1",
-            .reason_phrase = "OK"
-        },
-        {
-            {"Content-Length", std::to_string(file_size)},
-            {"Content-Type", content_type},
-            {"X-Content-Type-Options", "nosniff"} 
-        },
-        std::nullopt
-    };
-
-
-
-    res.header.iov_len = meta::safe_cast<size_t>(
-        res_msg.format_to(static_cast<char*>(res.header.iov_base))
-         - static_cast<char*>(res.header.iov_base)
-    );
-    return res;
 }
 
+
+
+
+struct send_http_error {
+    http_file_ctx ctx;
+    io_link_timeout_awaiter<io_writev_awaiter> awaiter;
+
+    auto await_ready() { return awaiter.await_ready(); }
+    auto await_suspend(std::coroutine_handle<> handle) {
+        return awaiter.await_suspend(handle);
+    }
+    auto await_resume() {return awaiter.await_resume();}
+    send_http_error(int fd, http::error_code code){
+        auto content = http::error_contents[code];
+        this->ctx = http_file_ctx::make(
+            {
+                {static_cast<size_t>(code), "ERROR"},
+                {
+                    {"Content-Type", "text/html; charset=utf-8"},
+                    {"X-Content-Type-Options", "nosniff"},
+                    {"Content-Length", std::to_string(content.size())}
+                },
+                std::nullopt
+            },
+            (void*) content.data(),
+            content.size()
+        );
+        this->awaiter = io_link_timeout_awaiter{
+            io_writev_awaiter{fd, &ctx.header, 2},
+            5s
+        };
+    }
+};
 
 
 coro::task async_handle_connection(int fd, net::ipv4 addr) {
@@ -183,7 +221,7 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
             auto& [msg, remain_opt] = result.value();
             remain = remain_opt;
 
-            switch (msg.req_l.method) {
+            switch (msg.line.method) {
                 case http::method_t::GET: {
                     auto get_res = handle_get_req(msg);
                     if (get_res.has_value()) {
@@ -200,7 +238,7 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
                             log::async().error("Failed to send response");
                             co_return;
                         }
-                        log::async().info("successfully sent file {} to {}", get_res.value().full_path, client_addr.toString());
+                        log::async().info("successfully sent to {}", client_addr.toString());
 
                     } else {
                         co_await send_http_error{fd_w, get_res.error()};
@@ -224,14 +262,8 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
 
 
 
-coro::task server_loop(net::ipv4 addr) {
-    auto fd_w = setup_socket(addr);
+coro::task server_loop() {
 
-    if (!fd_w.is_valid()){
-        log::async().error("Failed to create socket");
-        co_return;
-    }
-    log::async().info("Server listening on {}", addr.toString());
     co_await coro::thread::dispatch_awaiter{};
 
     while(true){
@@ -239,7 +271,7 @@ coro::task server_loop(net::ipv4 addr) {
         socklen_t client_addr_len = sizeof(client_addr);
 
         auto res = co_await io_link_timeout_awaiter{
-            io_accept_awaiter{fd_w, (sockaddr *)&client_addr, &client_addr_len},
+            io_accept_awaiter{env::fd_w, (sockaddr *)&client_addr, &client_addr_len},
             5s
         };
 
@@ -252,4 +284,56 @@ coro::task server_loop(net::ipv4 addr) {
     }
 
     co_return;
+}
+
+
+
+
+
+
+
+
+struct app& app::set_root_path(std::string_view path) {
+    env::root_path = std::filesystem::absolute(path);
+    if (!std::filesystem::exists(env::root_path)) {
+        std::println("Root path does not exist: {}", env::root_path.string());
+        std::terminate();
+    }
+    if (!std::filesystem::is_directory(env::root_path)) {
+        std::println("Root path is not a directory: {}", env::root_path.string());
+        std::terminate();
+    }
+    return *this;
+}
+
+struct app& app::set_addr(std::string_view addr_str) {
+    auto parsed = net::parse_addr(addr_str);
+    if (parsed.has_value()) {
+        env::addr = parsed.value();
+    } else {
+        std::println("Failed to parse address: {}", parsed.error());
+        std::terminate();
+    }
+    env::fd_w = setup_socket(env::addr);
+
+    if (!env::fd_w.is_valid()){
+        std::println("Failed to create socket");
+        std::terminate();
+    }
+    return *this;
+}
+
+void app::run(){
+    server_loop();
+    std::signal(SIGINT, [](int) {
+        std::println("Received SIGINT, stopping server...");
+        coro_io_ctx::get_instance().request_stop();
+    });
+    coro_io_ctx::get_instance().run();
+}
+
+
+struct app& app(){
+    static struct app instance;
+    return instance;
 }

@@ -7,14 +7,13 @@
 #include <type_traits>
 #include "meta.h"
 #include "coro_io_ctx.h"
-using namespace seele;
 template<typename derived>
 struct io_awaiter {
     io_uring_cqe cqe;
     bool await_ready() { return false; }
     void await_suspend(std::coroutine_handle<void> handle) {
-        io_ctx::get_instance().submit(
-           new io_ctx::request{
+        coro_io_ctx::get_instance().submit(
+           new coro_io_ctx::request{
                 handle,
                 &cqe,
                 false, 
@@ -83,7 +82,7 @@ struct io_writev_awaiter : io_awaiter<io_writev_awaiter> {
     const iovec* iov;
     unsigned nr_iov;
     off_t offset;
-
+    io_writev_awaiter() = default;
     io_writev_awaiter(int fd, const iovec* iov, unsigned nr_iov, off_t offset = 0)
         : fd(fd), iov(iov), nr_iov(nr_iov), offset(offset) {}
 
@@ -118,8 +117,8 @@ struct io_link_timeout_awaiter {
     io_awaiter_t awaiter;
     bool await_ready() { return false; }
     void await_suspend(std::coroutine_handle<void> handle) {
-        io_ctx::get_instance().submit(
-            new io_ctx::request{
+        coro_io_ctx::get_instance().submit(
+            new coro_io_ctx::request{
                 handle,
                 &awaiter.cqe,
                 true, 
@@ -137,8 +136,11 @@ struct io_link_timeout_awaiter {
         }
         return awaiter.cqe;
     }
+    io_link_timeout_awaiter() = default;
+
+
     template<typename duration_t>
-        requires meta::is_specialization_of_v<std::decay_t<duration_t>, std::chrono::duration>
+        requires seele::meta::is_specialization_of_v<std::decay_t<duration_t>, std::chrono::duration>
     io_link_timeout_awaiter(io_awaiter_t&& awaiter, duration_t&& duration) : 
         ts(std::chrono::duration_cast<std::chrono::seconds>(duration).count(),
            std::chrono::duration_cast<std::chrono::nanoseconds>(

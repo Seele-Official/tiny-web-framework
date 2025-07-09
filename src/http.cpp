@@ -1,5 +1,7 @@
 #include "http.h"
+#include <algorithm>
 #include <array>
+#include <cstdint>
 #include <expected>
 #include <optional>
 #include <string>
@@ -14,6 +16,12 @@ namespace http {
     using std::literals::operator""s;
     using std::literals::operator""ms;
 
+
+    constexpr bool is_hex_digit(char c) {
+        return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f');
+    }
+
+
     constexpr std::array<bool, 256> gen_tchar_map(){
         std::array<bool, 256> tchar_map{};
         for (auto& c :"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&'*+-.^_`|~"){
@@ -22,9 +30,40 @@ namespace http {
         return tchar_map;
     }
 
-    bool is_tchar(char c) {
+    constexpr bool is_tchar(char c) {
         static constexpr std::array<bool, 256> tchar_map = gen_tchar_map();
         return tchar_map[static_cast<unsigned char>(c)];
+    }
+
+    constexpr std::array<bool, 256> gen_absolute_path_char_map(){
+        std::array<bool, 256> char_map{};
+        for (auto& c :"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-._~!$&'()*+,;=:@/"){
+            char_map[static_cast<unsigned char>(c)] = true;
+        }
+        return char_map;
+    }
+
+    constexpr bool is_absolute_path_char(char c){
+        static constexpr std::array<bool, 256> char_map = gen_absolute_path_char_map();
+        return char_map[static_cast<unsigned char>(c)];
+    }
+
+    constexpr std::array<uint8_t, 256> gen_pct_map(){
+        std::array<uint8_t, 256> map{};
+        map.fill(0xFF);
+        map['0'] = 0x00; map['1'] = 0x01; map['2'] = 0x02; map['3'] = 0x03;
+        map['4'] = 0x04; map['5'] = 0x05; map['6'] = 0x06; map['7'] = 0x07;
+        map['8'] = 0x08; map['9'] = 0x09; map['A'] = 0x0A; map['B'] = 0x0B;
+        map['C'] = 0x0C; map['D'] = 0x0D; map['E'] = 0x0E; map['F'] = 0x0F;
+        map['a'] = 0x0A; map['b'] = 0x0B; map['c'] = 0x0C; map['d'] = 0x0D;
+        map['e'] = 0x0E; map['f'] = 0x0F;
+        return map;
+    }
+
+    constexpr char pct_decode(const char* hex) {
+        static constexpr std::array<uint8_t, 256> pct_map = gen_pct_map();
+        return static_cast<char>(pct_map[(uint8_t)hex[0]] << 4 |
+                                    pct_map[(uint8_t)hex[1]]);
     }
 
 
@@ -79,6 +118,89 @@ namespace http {
         }
         return str.substr(0, end);
     }
+
+    std::optional<std::string> parse_absolute_path(std::string_view path) {
+        std::string res;
+        for (auto it = path.cbegin(); it != path.cend(); ++it) {
+            if (!is_absolute_path_char(*it)) {
+                if (*it == '%'){
+                    if ((it + 1) != path.cend() && (it + 2) != path.cend()){
+                        if (is_hex_digit(it[1]) && is_hex_digit(it[2])) {
+                            res.push_back(pct_decode(it + 1));
+                            it += 2; // Skip the next two characters
+                        } else {
+                            return std::nullopt; // Invalid percent-encoded sequence
+                        }
+                    } else {
+                        return std::nullopt;                        
+                    }
+                } else {
+                    return std::nullopt;
+                }
+            } else {
+                res.push_back(*it);
+            }
+        }
+        return res;
+    }
+
+    std::optional<std::string> parse_absolute_query(std::string_view path) {
+        std::string res;
+        for (auto it = path.cbegin(); it != path.cend(); ++it) {
+            if (!is_absolute_path_char(*it  && *it != '?')) {
+                if (*it == '%'){
+                    if ((it + 1) != path.cend() && (it + 2) != path.cend()){
+                        if (is_hex_digit(it[1]) && is_hex_digit(it[2])) {
+                            res.push_back(pct_decode(it + 1));
+                            it += 2; // Skip the next two characters
+                        } else {
+                            return std::nullopt; // Invalid percent-encoded sequence
+                        }
+                    } else {
+                        return std::nullopt;                        
+                    }
+                } else {
+                    return std::nullopt;
+                }
+            } else {
+                res.push_back(*it);
+            }
+        }
+        return res;
+    }
+
+
+
+    std::optional<request_target_t> parse_request_target(std::string_view str) {
+        request_target_t target;
+        if (str.starts_with("/")){
+            // origin form
+            auto pos = str.find('?');
+            if (pos == std::string_view::npos){
+                auto path = parse_absolute_path(str);
+                if (!path.has_value()){
+                    return std::nullopt; // Invalid path
+                }
+                return origin_form{
+                    path.value(),
+                    std::nullopt // No query
+                };
+            }
+            auto path = parse_absolute_path(str.substr(0, pos));
+            auto query = parse_absolute_path(str.substr(pos + 1));
+            if (!path || !query) {
+                return std::nullopt; // Invalid path or query
+            }
+            return origin_form{
+                path.value(),
+                query.value()
+            };
+
+        }
+        return absolute_form{};
+    }
+
+
 
     std::string_view trim_string_view(std::string_view str) {
         size_t start = 0;
@@ -135,11 +257,17 @@ namespace http {
             co_return std::nullopt;
         }
 
-        message.req_l = {
-            *method_opt,
-            std::string(req_line_parts[1]),
-            std::string(req_line_parts[2])
-        };
+
+        if (auto req_target = parse_request_target(req_line_parts[1]); req_target.has_value()) {
+            message.line = {
+                *method_opt,
+                std::move(req_target.value()),
+                std::string(req_line_parts[2])
+            };
+        } else {
+            co_return std::nullopt; // Invalid request target
+        }
+
 
         line_buffer.clear();
 
@@ -205,11 +333,6 @@ namespace http {
     error_content_map error_contents = {
         {
             error_code::bad_request,
-            "HTTP/1.1 400 Bad Request\r\n"
-            "Content-Type: text/html; charset=utf-8\r\n"
-            "X-Content-Type-Options: nosniff\r\n"
-            "Connection: close\r\n"
-            "\r\n"
             "<!DOCTYPE html>\n"
             "<html>\n"
             "<head>\n"
@@ -238,11 +361,6 @@ namespace http {
         },
         {
             error_code::forbidden,
-            "HTTP/1.1 403 Forbidden\r\n"
-            "Content-Type: text/html; charset=utf-8\r\n"
-            "X-Content-Type-Options: nosniff\r\n"
-            "Connection: close\r\n"
-            "\r\n"
             "<!DOCTYPE html>\n"
             "<html>\n"
             "<head>\n"
@@ -270,11 +388,6 @@ namespace http {
         },
         {
             error_code::not_found,
-            "HTTP/1.1 404 Not Found\r\n"
-            "Content-Type: text/html; charset=utf-8\r\n"
-            "X-Content-Type-Options: nosniff\r\n"
-            "Connection: close\r\n"
-            "\r\n"
             "<!DOCTYPE html>\n"
             "<html>\n"
             "<head>\n"
@@ -301,12 +414,6 @@ namespace http {
         },
         {
             error_code::method_not_allowed,
-            "HTTP/1.1 405 Method Not Allowed\r\n"
-            "Content-Type: text/html; charset=utf-8\r\n"
-            "Allow: GET\r\n"
-            "X-Content-Type-Options: nosniff\r\n"
-            "Connection: close\r\n"
-            "\r\n"
             "<!DOCTYPE html>\n"
             "<html>\n"
             "<head>\n"
@@ -377,6 +484,27 @@ namespace http {
             "    </div>\n"
             "</body>\n"
             "</html>"   
+        },
+        {
+            error_code::not_implemented,
+            "<!DOCTYPE html>\n"
+            "<html>\n"
+            "<head>\n"
+            "    <title>501 Not Implemented</title>\n"
+            "    <style>\n"
+            "        body { font-family: Arial, sans-serif; line-height: 1.6; margin: 0; padding: 20px; color: #333; }\n"
+            "        h1 { color: #d9534f; }\n"
+            "        .container { max-width: 800px; margin: 0 auto; }\n"
+            "    </style>\n"
+            "</head>\n"
+            "<body>\n"
+            "    <div class=\"container\">\n"
+            "        <h1>501 Not Implemented</h1>\n"
+            "        <p>The server does not support the functionality required to fulfill the request.</p>\n"
+            "        <hr>\n"
+            "    </div>\n"
+            "</body>\n"
+            "</html>"
         }
 
     };

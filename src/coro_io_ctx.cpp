@@ -4,7 +4,7 @@
 #include <print>
 using namespace seele;
 using std::chrono::operator""ms;
-void io_ctx::worker(std::stop_token st){
+void coro_io_ctx::worker(std::stop_token st){
 
     size_t submit_count = 0;
     while (!st.stop_requested()){
@@ -71,7 +71,7 @@ void io_ctx::worker(std::stop_token st){
 
 
 
-void io_ctx::listener(std::stop_token st){
+void coro_io_ctx::listener(std::stop_token st){
     while (!st.stop_requested()) {
 
         io_uring_cqe* cqe;
@@ -112,7 +112,7 @@ void io_ctx::listener(std::stop_token st){
     }
 }
 
-io_ctx::~io_ctx() {
+coro_io_ctx::~coro_io_ctx() {
     __kernel_timespec ts{ .tv_sec = 1, .tv_nsec = 0 };
     io_uring_submit(&ring);
 

@@ -7,14 +7,14 @@
 #include <source_location>
 #include <string_view>
 #include <print>
-#include <functional>
 #include <utility>
 #include <chrono>
-#include <atomic>
 #include <format>
 #include "coro/async.h"
 #include "meta.h"
-namespace seele::log{  
+namespace seele::log{
+
+
     constexpr bool default_enabled = true;
 
     enum class level {
@@ -25,33 +25,12 @@ namespace seele::log{
         trace
     };
     class logger_impl {
-    private:
-        std::atomic<bool> enabled;
-        std::mutex mutex;    
-        std::ostream* output;        
-    
-        inline explicit logger_impl() : enabled{false}, output{&std::cout} {}
-
-        inline ~logger_impl() {
-            if (output != &std::cout) {
-                delete output;
-            }
-        }
-        template<typename... args_t>
-        void log(
-            level level,
-            std::source_location loc,
-            std::chrono::system_clock::time_point time,
-            std::format_string<args_t...> fmt,
-            args_t&&... args
-        );
-
     public:
         friend class async_agent;
         friend class sync_agent;
-        logger_impl(const logger_impl&) = delete;
-        logger_impl& operator=(const logger_impl&) = delete;
+        logger_impl(const logger_impl&) = delete;        
         logger_impl(logger_impl&&) = delete;
+        logger_impl& operator=(const logger_impl&) = delete;
         logger_impl& operator=(logger_impl&&) = delete;
 
 
@@ -60,16 +39,32 @@ namespace seele::log{
             return inst;
         }
 
-        inline void set_enable(bool enabled) {
-            this->enabled = enabled;
-        }
         inline void set_output(std::ostream& os) {
             this->output = &os;
         }
+
         inline void set_output_file(std::string_view filename) {
             this->output = new std::ofstream{filename.data(), std::ios::app};
         }
-
+    private:
+        template<typename... args_t>
+        void log(
+            level level,
+            std::source_location loc,
+            std::chrono::system_clock::time_point time,
+            std::format_string<args_t...> fmt,
+            args_t&&... args
+        );      
+    
+        inline explicit logger_impl() : output{&std::cout} {}
+        inline ~logger_impl() {
+            if (output != &std::cout) {
+                delete output;
+            }
+        }
+  
+        std::mutex mutex;    
+        std::ostream* output;        
     };
 
     inline auto& logger() {
@@ -80,14 +75,13 @@ namespace seele::log{
     void logger_impl::log(level lvl, 
         std::source_location loc, std::chrono::system_clock::time_point time,
         std::format_string<args_t...> fmt, args_t&&... args){
+        static auto lvl_map = seele::meta::enum_name_table<level>();
 
-        static auto logLevels = seele::meta::enum_name_table<level>();
-        if (!enabled) return;
         std::lock_guard lock(mutex);
         std::println(
             *this->output,
             "[{}] {} {}:{}:{} :{}",
-            logLevels[static_cast<int>(lvl)], time, loc.file_name(), loc.line(), loc.column(),
+            lvl_map[static_cast<int>(lvl)], time, loc.file_name(), loc.line(), loc.column(),
             std::format(
                 fmt, std::forward<args_t>(args)...
             )
@@ -101,7 +95,6 @@ namespace seele::log{
         template<typename... args_t>
         void log(level lvl, std::format_string<args_t...> fmt, args_t&&... args){
             if constexpr (default_enabled){
-                if (!logger().enabled) return;
                 logger().log(
                     lvl, loc, now, fmt, std::forward<args_t>(args)...
                 );
@@ -148,7 +141,6 @@ namespace seele::log{
         template<typename... args_t>
         void log(level lvl, std::format_string<std::decay_t<args_t>&...> fmt, args_t&&... args){
             if constexpr (default_enabled){
-                if (!logger().enabled) return;
                 seele::coro::async(
                     &logger_impl::log<std::decay_t<args_t>&...>,
                     std::ref(logger()), lvl, loc, now, fmt, std::forward<args_t>(args)...

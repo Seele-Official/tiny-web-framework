@@ -24,12 +24,11 @@
 
 
 
-using namespace seele;
-
 
 
 struct fd_wrapper {
     int fd;
+    fd_wrapper() : fd(-1) {}
     fd_wrapper(int fd) : fd(fd) {}
     fd_wrapper(fd_wrapper&) = delete;
     fd_wrapper(fd_wrapper&& other) noexcept : fd(other.fd) {
@@ -61,6 +60,7 @@ struct fd_wrapper {
 };
 
 struct iovec_wrapper : iovec {
+    iovec_wrapper() : iovec{nullptr, 0} {}
     iovec_wrapper(size_t len) : iovec{new std::byte[len], len} {}
     iovec_wrapper(iovec_wrapper&) = delete;
     iovec_wrapper(iovec_wrapper&& other) noexcept : iovec{other.iov_base, other.iov_len} {
@@ -127,6 +127,6 @@ struct file_mmap{
 };
 
 
-fd_wrapper setup_socket(net::ipv4 v4);
+fd_wrapper setup_socket(seele::net::ipv4 v4);
 
 int64_t get_file_size(const fd_wrapper& fd_w);

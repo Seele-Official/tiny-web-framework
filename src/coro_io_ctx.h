@@ -14,7 +14,7 @@
 #include "structs/object_pool.h"
 constexpr size_t submit_threshold = 64;
 
-class io_ctx{
+class coro_io_ctx{
 public:      
     struct request{        
         std::coroutine_handle<void> handle;        
@@ -24,17 +24,10 @@ public:
         void* helper_ptr;
         auto (*sqe_handle)(void*, io_uring_sqe*) -> void;
     };  
-    io_ctx(const io_ctx&) = delete;
-    io_ctx(io_ctx&&) = delete;
-    io_ctx& operator=(const io_ctx&) = delete;
-    io_ctx& operator=(io_ctx&&) = delete;
-
-    io_ctx(uint32_t entries = 1024, uint32_t flags = 0) : max_entries{entries}, pending_sqe_count{0}, unp_sem{0}{
-        this->worker_thread = std::jthread([&] (std::stop_token st) { worker(st); });
-        io_uring_queue_init(entries, &ring, flags);
-    }
-    ~io_ctx();
-
+    coro_io_ctx(const coro_io_ctx&) = delete;
+    coro_io_ctx(coro_io_ctx&&) = delete;
+    coro_io_ctx& operator=(const coro_io_ctx&) = delete;
+    coro_io_ctx& operator=(coro_io_ctx&&) = delete;
 
     void submit(request* req){
         this->unprocessed_requests.emplace_back(req);
@@ -48,11 +41,19 @@ public:
     inline void run(){ listener(stop_src.get_token()); }
     inline void request_stop() { stop_src.request_stop(); }
 
-    inline static io_ctx& get_instance() {
-        static io_ctx instance;
+    inline static coro_io_ctx& get_instance() {
+        static coro_io_ctx instance;
         return instance;
     }
 private:    
+    coro_io_ctx(uint32_t entries = 1024, uint32_t flags = 0) : max_entries{entries}, pending_sqe_count{0}, unp_sem{0}{
+        this->worker_thread = std::jthread([&] (std::stop_token st) { worker(st); });
+        io_uring_queue_init(entries, &ring, flags);
+    }
+    ~coro_io_ctx();  
+
+
+
     io_uring ring;
     std::stop_source stop_src;
     std::jthread worker_thread; 

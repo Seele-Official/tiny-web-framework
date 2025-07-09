@@ -9,11 +9,11 @@
 #include "meta.h"
 #include "coro/co_task.h"
 #include "coro/task.h"
-using namespace seele;
+
 
 
 namespace http {
-       
+    using namespace seele;       
     
     enum method_t {
         GET,
@@ -28,16 +28,28 @@ namespace http {
     };     
 
 
+    struct origin_form{
+        std::string path;
+        std::optional<std::string> query;
+    };
+    struct absolute_form{};
+    struct authority_form{};
+    struct asterisk_form{};
+
+    using request_target_t = std::variant<
+        origin_form, absolute_form, authority_form, asterisk_form
+    >;
+
     struct req_line {
 
         method_t method;
-        std::string uri;
+        request_target_t target;
         std::string version;
         
         template<typename out_t>
         auto format_to(out_t&& out) const {
             return std::format_to(std::forward<out_t>(out), "{} {} {}\r\n", 
-                meta::enum_to_string(method), uri, version);
+                meta::enum_to_string(method), target, version);
         }
 
     };
@@ -45,7 +57,7 @@ namespace http {
     struct parse_res;
     struct req_msg {
 
-        req_line req_l;
+        req_line line;
         std::unordered_map<std::string, std::string> fields;
         std::optional<std::string> body;
 
@@ -60,10 +72,13 @@ namespace http {
 
 
     struct stat_line{
-        int64_t status_code;
+        size_t status_code;
         std::string version;
         std::string reason_phrase;
-
+        stat_line(size_t status_code, std::string reason_phrase) :
+            status_code(status_code),
+            version("HTTP/1.1"),
+            reason_phrase(std::move(reason_phrase)) {}
         template<typename out_t>
         auto format_to(out_t&& out) const {
             return std::format_to(std::forward<out_t>(out), "{} {} {}\r\n", version, status_code, reason_phrase);
@@ -99,7 +114,8 @@ namespace http {
 
 
 
-        internal_server_error = 500
+        internal_server_error = 500,
+        not_implemented = 501,
     };
 
     struct error_content{
