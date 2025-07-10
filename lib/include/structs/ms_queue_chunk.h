@@ -160,8 +160,11 @@ namespace seele::structs {
 
             // If we reach here, it means the current chunk is full
             // We need to create a new chunk and link it
-            
-            chunk_t* new_chunk = new chunk_t();                
+
+            static thread_local std::unique_ptr<chunk_t> local_cache = std::make_unique<chunk_t>();
+
+            chunk_t* new_chunk = local_cache.get();
+
             auto next = old_tail->next.load(std::memory_order_acquire);
 
             if (next == nullptr) {
@@ -175,8 +178,13 @@ namespace seele::structs {
                         std::memory_order_relaxed,
                         std::memory_order_relaxed
                     );
-                    hp.clear<HAZ_TAIL>();                     
-                    continue; // successfully linked new chunk
+                    hp.clear<HAZ_TAIL>(); 
+                    // successfully linked new chunk
+                    // release the local cache
+                    // and reset it
+                    local_cache.release();
+                    local_cache = std::make_unique<chunk_t>();       
+                    continue;
                 }
 
             }
@@ -188,8 +196,6 @@ namespace seele::structs {
             );
             hp.clear<HAZ_TAIL>(); 
                          
-            
-            delete new_chunk; // clean up the new chunk if it was not used
         }
     }
 

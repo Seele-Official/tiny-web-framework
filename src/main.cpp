@@ -8,7 +8,7 @@
 using namespace seele;
 
 int main(int argc, char* argv[]) {
-    // log::logger().set_output_file("web_server.log");
+    log::logger().set_output_file("web_server.log");
     auto opts = opts::make_opts(
         opts::ruler::req_arg("--address", "-a"),
         opts::ruler::req_arg("--path", "-p")

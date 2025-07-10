@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include <iostream>
 #include <fstream>
 #include <mutex>
@@ -13,9 +14,9 @@
 #include "coro/async.h"
 #include "meta.h"
 namespace seele::log{
-
-
-    constexpr bool default_enabled = true;
+    using clock = std::chrono::system_clock;
+    using soc_loc = std::source_location;
+    constexpr size_t log_level = 0;
 
     enum class level {
         error,
@@ -24,10 +25,11 @@ namespace seele::log{
         debug,
         trace
     };
+
     class logger_impl {
     public:
-        friend class async_agent;
-        friend class sync_agent;
+        friend class async;
+        friend class sync;
         logger_impl(const logger_impl&) = delete;        
         logger_impl(logger_impl&&) = delete;
         logger_impl& operator=(const logger_impl&) = delete;
@@ -72,29 +74,61 @@ namespace seele::log{
     }
 
     template<typename... args_t>
-    void logger_impl::log(level lvl, 
-        std::source_location loc, std::chrono::system_clock::time_point time,
-        std::format_string<args_t...> fmt, args_t&&... args){
+    void logger_impl::log(level lvl, soc_loc loc, clock::time_point time, std::format_string<args_t...> fmt, args_t&&... args){
         static auto lvl_map = seele::meta::enum_name_table<level>();
+        if constexpr (log_level == 0){
+            return; // No logging
+        } else if constexpr (log_level == 1){
+            if (lvl == level::trace || lvl == level::debug) {
+                return; // No trace or debug logging
+            }
 
-        std::lock_guard lock(mutex);
-        std::println(
-            *this->output,
-            "[{}] {} {}:{}:{} :{}",
-            lvl_map[static_cast<int>(lvl)], time, loc.file_name(), loc.line(), loc.column(),
-            std::format(
-                fmt, std::forward<args_t>(args)...
-            )
-        );
+            std::lock_guard lock(mutex);
+            std::println(
+                *this->output,
+                "[{}] [{:%Y-%m-%d %H:%M:%S}] :{}",
+                lvl_map[static_cast<int>(lvl)], time,
+                std::format(
+                    fmt, std::forward<args_t>(args)...
+                )
+            );
+
+        } else {
+            if (lvl == level::trace || lvl == level::debug) {
+                std::lock_guard lock(mutex);
+                std::println(
+                    *this->output,
+                    "[{}] [{:%Y-%m-%d %H:%M:%S}] {}:{}:{} :{}",
+                    lvl_map[static_cast<int>(lvl)], time, loc.file_name(), loc.line(), loc.column(),
+                    std::format(
+                        fmt, std::forward<args_t>(args)...
+                    )
+                );
+            } else {
+                std::lock_guard lock(mutex);
+                std::println(
+                    *this->output,
+                    "[{}] [{:%Y-%m-%d %H:%M:%S}] :{}",
+                    lvl_map[static_cast<int>(lvl)], time,
+                    std::format(
+                        fmt, std::forward<args_t>(args)...
+                    )
+                );                
+            }
+
+
+                        
+        }
+
     }
 
-    struct sync_agent{
-        std::source_location loc;
-        std::chrono::system_clock::time_point now;
-        
+    struct sync{
+        soc_loc loc;
+        clock::time_point now;
+        sync(soc_loc loc = soc_loc::current(), clock::time_point now = clock::now()) : loc{loc}, now{now} {}
         template<typename... args_t>
         void log(level lvl, std::format_string<args_t...> fmt, args_t&&... args){
-            if constexpr (default_enabled){
+            if constexpr (log_level != 0){
                 logger().log(
                     lvl, loc, now, fmt, std::forward<args_t>(args)...
                 );
@@ -103,44 +137,56 @@ namespace seele::log{
 
         template<typename... args_t>
         void error(std::format_string<args_t...> fmt, args_t&&... args){
-            this->log(
-                level::error, fmt, std::forward<args_t>(args)...
-            );
+            if constexpr (log_level != 0){
+                this->log(
+                    level::error, fmt, std::forward<args_t>(args)...
+                );
+            }
         }
 
         template<typename... args_t>
         void warn(std::format_string<args_t...> fmt, args_t&&... args){
-            this->log(
-                level::warn, fmt, std::forward<args_t>(args)...
-            );
+            if constexpr (log_level != 0){
+                this->log(
+                    level::warn, fmt, std::forward<args_t>(args)...
+                );
+            }
         }
 
         template<typename... args_t>
         void info(std::format_string<args_t...> fmt, args_t&&... args){
-            this->log(
-                level::info, fmt, std::forward<args_t>(args)...
-            );
+            if constexpr (log_level != 0){
+                this->log(
+                    level::info, fmt, std::forward<args_t>(args)...
+                );
+            }
         }
 
         template<typename... args_t>
         void debug(std::format_string<args_t...> fmt, args_t&&... args){
-            this->log(
-                level::debug, fmt, std::forward<args_t>(args)...
-            );
+            if constexpr (log_level > 1){
+                this->log(
+                    level::debug, fmt, std::forward<args_t>(args)...
+                );
+            }
         }
 
         template<typename... args_t>
         void trace(std::format_string<args_t...> fmt, args_t&&... args){
-            this->log(
-                level::trace, fmt, std::forward<args_t>(args)...
-            );
+            if constexpr (log_level > 1){
+                this->log(
+                    level::trace, fmt, std::forward<args_t>(args)...
+                );
+            }
         }
     };
 
-    struct async_agent : sync_agent{
+    struct async : sync{
+        async(soc_loc loc = soc_loc::current(), clock::time_point now = clock::now()) : sync{loc, now} {}
+
         template<typename... args_t>
         void log(level lvl, std::format_string<std::decay_t<args_t>&...> fmt, args_t&&... args){
-            if constexpr (default_enabled){
+            if constexpr (log_level != 0){
                 seele::coro::async(
                     &logger_impl::log<std::decay_t<args_t>&...>,
                     std::ref(logger()), lvl, loc, now, fmt, std::forward<args_t>(args)...
@@ -150,50 +196,51 @@ namespace seele::log{
         }
         template<typename... args_t>
         void error(std::format_string<std::decay_t<args_t>&...> fmt, args_t&&... args){
-            this->log(
-                level::error, fmt, std::forward<args_t>(args)...
-            );
+            if constexpr (log_level != 0){
+                this->log(
+                    level::error, fmt, std::forward<args_t>(args)...
+                );
+            }
         }
 
         template<typename... args_t>
         void warn(std::format_string<std::decay_t<args_t>&...> fmt, args_t&&... args){
-            this->log(
-                level::warn, fmt, std::forward<args_t>(args)...
-            );
+            if constexpr (log_level != 0){
+                this->log(
+                    level::warn, fmt, std::forward<args_t>(args)...
+                );
+            }
         }
 
         template<typename... args_t>
         void info(std::format_string<std::decay_t<args_t>&...> fmt, args_t&&... args){
-            this->log(
-                level::info, fmt, std::forward<args_t>(args)...
-            );
+            if constexpr (log_level != 0){
+                this->log(
+                    level::info, fmt, std::forward<args_t>(args)...
+                );
+            }
         }
 
         template<typename... args_t>
         void debug(std::format_string<std::decay_t<args_t>&...> fmt, args_t&&... args){
-            this->log(
-                level::debug, fmt, std::forward<args_t>(args)...
-            );
+            if constexpr (log_level > 1){
+                this->log(
+                    level::debug, fmt, std::forward<args_t>(args)...
+                );
+            }
         }
 
         template<typename... args_t>
         void trace(std::format_string<std::decay_t<args_t>&...> fmt, args_t&&... args){
-            this->log(
-                level::trace, fmt, std::forward<args_t>(args)...
-            );
+            if constexpr (log_level > 1){
+                this->log(
+                    level::trace, fmt, std::forward<args_t>(args)...
+                );
+            }
         }
 
     };
     
-    inline async_agent async(
-        std::source_location loc = std::source_location::current(), 
-        std::chrono::system_clock::time_point now = std::chrono::system_clock::now()) 
-    { return async_agent{loc, now}; }
-
-    inline sync_agent sync(
-        std::source_location loc = std::source_location::current(), 
-        std::chrono::system_clock::time_point now = std::chrono::system_clock::now()) 
-    { return sync_agent{loc, now}; }
 
 }
 

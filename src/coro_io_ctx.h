@@ -36,9 +36,9 @@ public:
 
     void worker(std::stop_token st);
 
-    void listener(std::stop_token st);
+    void start_listen(std::stop_token st);
 
-    inline void run(){ listener(stop_src.get_token()); }
+    inline void run(){ start_listen(stop_src.get_token()); }
     inline void request_stop() { stop_src.request_stop(); }
 
     inline static coro_io_ctx& get_instance() {
@@ -46,8 +46,8 @@ public:
         return instance;
     }
 private:    
-    coro_io_ctx(uint32_t entries = 1024, uint32_t flags = 0) : max_entries{entries}, pending_sqe_count{0}, unp_sem{0}{
-        this->worker_thread = std::jthread([&] (std::stop_token st) { worker(st); });
+    coro_io_ctx(uint32_t entries = 1024, uint32_t flags = 0) : max_entries{entries}, pending_req_count{0}, unp_sem{0}{
+        this->worker_thread = std::jthread([&] (std::stop_token st) { worker(st); }, stop_src.get_token());
         io_uring_queue_init(entries, &ring, flags);
     }
     ~coro_io_ctx();  
@@ -57,9 +57,9 @@ private:
     io_uring ring;
     std::stop_source stop_src;
     std::jthread worker_thread; 
-
+    std::atomic<bool> is_worker_running;
     const size_t max_entries;
-    std::atomic<size_t> pending_sqe_count;
+    std::atomic<size_t> pending_req_count;
 
     std::counting_semaphore<> unp_sem;
     seele::structs::ms_queue_chunk<request*> unprocessed_requests;

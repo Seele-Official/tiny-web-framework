@@ -3,10 +3,12 @@
 
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <expected>
 #include <format>
 #include <mutex>
 #include <optional>
+#include <print>
 #include <string>
 #include <cstddef>
 #include <string_view>
@@ -38,50 +40,60 @@ namespace file_cache {
     static std::mutex mutex{};
     static std::unordered_map<std::string, file_mmap> files{};
 
-    std::expected<iovec, http::error_code> get(std::filesystem::path path) {
+    std::expected<iovec, http::error_code> get(const std::filesystem::path& path) {
         auto full_path = std::filesystem::absolute(path);
-        {
-            std::lock_guard<std::mutex> lock(mutex);
-
-            if (auto it = files.find(full_path.string());it != files.end()) {
-
-                return iovec{
-                    it->second.data,
-                    it->second.size
-                };
-
-            } else {
-                fd_wrapper file_fd_w(open(full_path.c_str(), O_RDONLY));
-                if (!file_fd_w.is_valid()) {
-                    if (errno == EACCES || errno == EPERM) {
-                        return std::unexpected{http::error_code::forbidden};
-                    }
-                    return std::unexpected{http::error_code::not_found};
-                }
-
-
-                int64_t file_size = get_file_size(file_fd_w);
-                if (file_size < 0) {
-                    log::async().error("Failed to get file size for {}", full_path.string());
-                    return std::unexpected{http::error_code::internal_server_error};
-                }
-
-                file_mmap f(file_size, PROT_READ, MAP_SHARED, file_fd_w, 0);
-                
-                iovec i{
-                    f.data,
-                    f.size
-                };
-
-                files.emplace(full_path.string(), std::move(f));
-                return i;
-            }
+        if (auto it = files.find(path.string());it != files.end()) {
+            return iovec{
+                it->second.data,
+                it->second.size
+            };
         }
-
-
-
-
+        return std::unexpected{http::error_code::not_found};
     }
+    // std::expected<iovec, http::error_code> get(const std::filesystem::path& path) {
+    //     auto full_path = std::filesystem::absolute(path);
+    //     {
+    //         std::lock_guard<std::mutex> lock(mutex);
+
+    //         if (auto it = files.find(full_path.string());it != files.end()) {
+
+    //             return iovec{
+    //                 it->second.data,
+    //                 it->second.size
+    //             };
+
+    //         } else {
+    //             fd_wrapper file_fd_w(open(full_path.c_str(), O_RDONLY));
+    //             if (!file_fd_w.is_valid()) {
+    //                 if (errno == EACCES || errno == EPERM) {
+    //                     return std::unexpected{http::error_code::forbidden};
+    //                 }
+    //                 return std::unexpected{http::error_code::not_found};
+    //             }
+
+
+    //             int64_t file_size = get_file_size(file_fd_w);
+    //             if (file_size < 0) {
+    //                 log::async().error("Failed to get file size for {}", full_path.string());
+    //                 return std::unexpected{http::error_code::internal_server_error};
+    //             }
+
+    //             file_mmap f(file_size, PROT_READ, MAP_SHARED, file_fd_w, 0);
+                
+    //             iovec i{
+    //                 f.data,
+    //                 f.size
+    //             };
+
+    //             files.emplace(full_path.string(), std::move(f));
+    //             return i;
+    //         }
+    //     }
+
+
+
+
+    // }
 
 }
 
@@ -205,15 +217,20 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
             };
             
             if (!res.has_value()) {
-                log::async().warn("Read timed out or failed");
+                log::async().warn("Read timed out");
                 co_return;
             }
 
             auto bytes_read = res.value().res;
-            if (bytes_read <= 0) {
-                log::async().warn("Connection closed by client or error occurred");
+            if (bytes_read == 0) {
+                log::async().warn("Connection closed by client");
                 co_return;
             }
+            if (bytes_read < 0) {
+                log::async().error("Failed to read from socket: {}", strerror(-bytes_read));
+                co_return;
+            }
+
             parser.send_and_resume({read_buffer, static_cast<size_t>(bytes_read)});
         }
 
@@ -238,8 +255,10 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
                             log::async().error("Failed to send response");
                             co_return;
                         }
-                        log::async().info("successfully sent to {}", client_addr.toString());
-
+                        if (res.value().res < 0) {
+                            log::async().error("Failed to send response: {}", strerror(-res.value().res));
+                            co_return;
+                        }
                     } else {
                         co_await send_http_error{fd_w, get_res.error()};
                     }
@@ -279,7 +298,10 @@ coro::task server_loop() {
             log::async().info("Accept timed out or failed");
             continue;
         }
-
+        if (res.value().res < 0) {
+            log::async().error("Accept failed: {}", strerror(-res.value().res));
+            break;
+        }
         async_handle_connection(res.value().res, net::ipv4::from_sockaddr_in(client_addr));
     }
 
@@ -295,6 +317,27 @@ coro::task server_loop() {
 
 struct app& app::set_root_path(std::string_view path) {
     env::root_path = std::filesystem::absolute(path);
+
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(env::root_path)) {
+        if (entry.is_regular_file()) {
+            auto full_path = std::filesystem::absolute(entry.path());
+            log::sync().info("Adding file to cache: {}", full_path.string());
+
+            fd_wrapper file_fd_w(open(full_path.c_str(), O_RDONLY));
+            if (!file_fd_w.is_valid()) {
+                std::println("Failed to open file: {}", full_path.string());
+                std::terminate();
+            }
+
+            int64_t file_size = get_file_size(file_fd_w);
+            if (file_size < 0) {
+                std::println("Failed to get file size for {}", full_path.string());
+                std::terminate();
+            }
+            file_mmap f(file_size, PROT_READ, MAP_SHARED, file_fd_w, 0);
+            file_cache::files.emplace(full_path.string(), std::move(f));
+        }
+    }
     if (!std::filesystem::exists(env::root_path)) {
         std::println("Root path does not exist: {}", env::root_path.string());
         std::terminate();
