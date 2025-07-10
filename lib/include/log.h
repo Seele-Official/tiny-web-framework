@@ -16,7 +16,7 @@
 namespace seele::log{
     using clock = std::chrono::system_clock;
     using soc_loc = std::source_location;
-    constexpr size_t log_level = 0;
+    constexpr size_t log_level = 1;
 
     enum class level {
         error,

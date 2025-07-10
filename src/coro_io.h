@@ -2,6 +2,7 @@
 #include <coroutine>
 #include <expected>
 #include <liburing.h>
+#include <optional>
 #include <tuple>
 #include <errno.h>
 #include <type_traits>
@@ -108,7 +109,6 @@ struct io_accept_awaiter : io_awaiter<io_accept_awaiter> {
 
 
 
-struct io_time_out_error{};
 
 template<typename io_awaiter_t>
     requires std::is_base_of_v<io_awaiter<io_awaiter_t>, io_awaiter_t>
@@ -130,9 +130,9 @@ struct io_link_timeout_awaiter {
             }
         );
     }
-    std::expected<io_uring_cqe, io_time_out_error> await_resume() { 
+    std::optional<io_uring_cqe> await_resume() { 
         if (awaiter.cqe.res == -ECANCELED) {
-            return std::unexpected(io_time_out_error{});
+            return std::nullopt;
         }
         return awaiter.cqe;
     }

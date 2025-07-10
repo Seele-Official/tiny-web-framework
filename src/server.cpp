@@ -6,6 +6,7 @@
 #include <exception>
 #include <expected>
 #include <format>
+#include <liburing/io_uring.h>
 #include <mutex>
 #include <optional>
 #include <print>
@@ -204,6 +205,7 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
 
     char read_buffer[8192];
     std::optional<std::string_view> remain = std::nullopt;
+    auto timeout = 1500ms;
     while (true) {
         auto parser = http::req_msg::parser();
         if (remain.has_value()) {
@@ -211,9 +213,9 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
             remain = std::nullopt;
         }
         while (!parser.done()) {       
-            auto res = co_await io_link_timeout_awaiter{
+            std::optional<io_uring_cqe> res = co_await io_link_timeout_awaiter{
                 io_read_awaiter{fd_w, read_buffer, sizeof(read_buffer)},
-                60s
+                timeout
             };
             
             if (!res.has_value()) {
@@ -238,17 +240,26 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
             auto& [msg, remain_opt] = result.value();
             remain = remain_opt;
 
+            if (auto it = msg.fields.find("Connection"); it != msg.fields.end()) {
+                if (it->second == "close") {
+                    co_return; // Close connection immediately
+                } else if (it->second == "keep-alive") {
+                    timeout = 10000ms; // Keep-alive timeout
+                }
+            }
+
+
             switch (msg.line.method) {
                 case http::method_t::GET: {
                     auto get_res = handle_get_req(msg);
                     if (get_res.has_value()) {
-                        auto res = co_await io_link_timeout_awaiter{
+                        std::optional<io_uring_cqe> res = co_await io_link_timeout_awaiter{
                             io_writev_awaiter{
                                 fd_w,
                                 &get_res.value().header,
                                 2
                             },
-                            5s
+                            timeout
                         };
 
                         if (!res.has_value()) {
@@ -289,7 +300,7 @@ coro::task server_loop() {
         sockaddr_in client_addr;
         socklen_t client_addr_len = sizeof(client_addr);
 
-        auto res = co_await io_link_timeout_awaiter{
+        std::optional<io_uring_cqe> res = co_await io_link_timeout_awaiter{
             io_accept_awaiter{env::fd_w, (sockaddr *)&client_addr, &client_addr_len},
             5s
         };

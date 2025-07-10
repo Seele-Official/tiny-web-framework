@@ -46,7 +46,7 @@ public:
         return instance;
     }
 private:    
-    coro_io_ctx(uint32_t entries = 1024, uint32_t flags = 0) : max_entries{entries}, pending_req_count{0}, unp_sem{0}{
+    coro_io_ctx(uint32_t entries = 2048, uint32_t flags = 0) : max_entries{entries}, pending_req_count{0}, unp_sem{0}{
         this->worker_thread = std::jthread([&] (std::stop_token st) { worker(st); }, stop_src.get_token());
         io_uring_queue_init(entries, &ring, flags);
     }
