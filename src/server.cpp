@@ -191,7 +191,7 @@ struct send_http_error {
         );
         this->awaiter = io_link_timeout_awaiter{
             io_writev_awaiter{fd, &ctx.header, 2},
-            5s
+            200ms
         };
     }
 };
@@ -205,7 +205,7 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
 
     char read_buffer[8192];
     std::optional<std::string_view> remain = std::nullopt;
-    auto timeout = 1500ms;
+    auto timeout = 500ms;
     while (true) {
         auto parser = http::req_msg::parser();
         if (remain.has_value()) {
@@ -371,7 +371,7 @@ struct app& app::set_addr(std::string_view addr_str) {
     env::fd_w = setup_socket(env::addr);
 
     if (!env::fd_w.is_valid()){
-        std::println("Failed to create socket");
+        std::println("Failed to create socket, error: {}", strerror(errno));
         std::terminate();
     }
     return *this;

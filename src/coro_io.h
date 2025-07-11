@@ -14,7 +14,6 @@ struct io_awaiter {
     bool await_ready() { return false; }
     void await_suspend(std::coroutine_handle<void> handle) {
         coro_io_ctx::get_instance().submit(
-           new coro_io_ctx::request{
                 handle,
                 &cqe,
                 false, 
@@ -23,7 +22,6 @@ struct io_awaiter {
                 [](void* helper_ptr, io_uring_sqe* sqe) {
                     static_cast<derived*>(helper_ptr)->setup(sqe);
                 }
-            } 
         );
     }
     io_uring_cqe await_resume() { return cqe; }
@@ -118,7 +116,6 @@ struct io_link_timeout_awaiter {
     bool await_ready() { return false; }
     void await_suspend(std::coroutine_handle<void> handle) {
         coro_io_ctx::get_instance().submit(
-            new coro_io_ctx::request{
                 handle,
                 &awaiter.cqe,
                 true, 
@@ -127,7 +124,7 @@ struct io_link_timeout_awaiter {
                 [](void* helper_ptr, io_uring_sqe* sqe) {
                     static_cast<io_awaiter_t*>(helper_ptr)->setup(sqe);
                 }
-            }
+            
         );
     }
     std::optional<io_uring_cqe> await_resume() { 

@@ -7,79 +7,63 @@
 #include <cstddef>
 #include <cstring>
 #include <liburing.h>
+#include <optional>
 #include <print>
 #include <thread>
 #include <variant>
 #include <vector>
 using namespace seele;
 using std::chrono::operator""ms;
+using std::chrono::operator""ns;
 
-
-
-struct io_usr_data;
-struct timeout_usr_data;
-using usr_data = std::variant<io_usr_data, timeout_usr_data>;
-struct io_usr_data{
-    std::coroutine_handle<> handle;
-    io_uring_cqe* cqe;
-};
-
-
-struct timeout_usr_data{
-    usr_data* io_data;
-};
 
 
 
 void coro_io_ctx::worker(std::stop_token st){
+
+
+
     this->is_worker_running.store(true, std::memory_order_release);
     size_t submit_count = 0;
     while (!st.stop_requested()) {
 
-        if (unp_sem.try_acquire_for(50ms)) {
+        if (unp_sem.try_acquire_for(5ms)) {
             auto req = unprocessed_requests.pop_front();
-            auto& [handle, cqe, is_timeout_link, time_out, helper_ptr, sqe_handle] = *req.value();
+            auto& [handle, cqe, is_timeout_link, time_out, helper_ptr, sqe_handle] = req.value();
             if (is_timeout_link) {
                 if (time_out) {
                     auto* sqe = io_uring_get_sqe(&ring);
                     auto* timeout_sqe = io_uring_get_sqe(&ring);
-
-                    if (!sqe || !timeout_sqe) {
-                        log::async().error("io_uring_get_sqe failed: {}", strerror(errno));
-                        break;
-                    }
-                    
+                    // Need to handle validation of sqe, but we assume the it's valid
                     sqe_handle(helper_ptr, sqe);
-                    auto io_data = new usr_data(
+                    auto io_data = this->usr_data_pool.allocate(
                         io_usr_data{handle, cqe}
                     );
                     sqe->user_data = std::bit_cast<std::uintptr_t>(io_data);                    
                     sqe->flags |= IOSQE_IO_LINK;
                     io_uring_prep_link_timeout(timeout_sqe, time_out, 0);
                     timeout_sqe->user_data = std::bit_cast<std::uintptr_t>(
-                        new usr_data(
+                        this->usr_data_pool.allocate(
                             timeout_usr_data{io_data}
                         )
                     );
+                    // Also need to handle validation of usr_data_pool allocation, but we assume it's valid
                     submit_count += 2;
                 } else {
                     log::async().error("Timeout link requested but time_out is null");
                 }
             } else {
                 auto* sqe = io_uring_get_sqe(&ring);
-                if (!sqe) {
-                    log::async().error("io_uring_get_sqe failed: {}", strerror(errno));
-                    break;
-                }
+                // Need to handle validation of sqe, but we assume the handle is valid
                 sqe_handle(helper_ptr, sqe);
                 sqe->user_data = std::bit_cast<std::uintptr_t>(
-                    new usr_data(
+                    this->usr_data_pool.allocate(
                         io_usr_data{handle, cqe}
                     )
                 );
-                submit_count++;      
+                submit_count++;
+                // Also need to handle validation of usr_data_pool allocation, but we assume it's valid
             }
-            delete req.value(); // Clean up the request object
             this->pending_req_count.fetch_add(1, std::memory_order_release);
             if (submit_count >= submit_threshold) {
                 auto submit_ret = io_uring_submit(&ring);
@@ -118,9 +102,7 @@ void coro_io_ctx::worker(std::stop_token st){
         if (!ret.has_value()) {
             break; // No more requests to process
         }
-        auto* req = ret.value();
-        req->handle.destroy();
-        delete req;
+        ret.value().handle.destroy();
     }
     this->is_worker_running.store(false, std::memory_order_release);
 }
@@ -166,7 +148,7 @@ void coro_io_ctx::start_listen(std::stop_token st){
                                     auto* io_data = std::get_if<io_usr_data>(usr_data.io_data);
                                     *io_data->cqe = *cqe;
                                     coro::thread::dispatch(io_data->handle);
-                                    delete usr_data.io_data; // Clean up the io data
+                                    this->usr_data_pool.deallocate(usr_data.io_data); // Clean up the io data
                                     this->pending_req_count.fetch_sub(1, std::memory_order_release);
                                 }
                             }
@@ -176,7 +158,7 @@ void coro_io_ctx::start_listen(std::stop_token st){
                     },
                     *data
                 );
-                delete data;
+                this->usr_data_pool.deallocate(data); // Clean up the user data
             }
             io_uring_cq_advance(&ring, count);
             log::async().debug("Processed {} completed requests", count);    
@@ -224,7 +206,7 @@ coro_io_ctx::~coro_io_ctx() {
                                     auto* io_data = std::get_if<io_usr_data>(usr_data.io_data);
                                     *io_data->cqe = *cqe;
                                     io_data->handle.destroy();
-                                    delete usr_data.io_data; // Clean up the io data
+                                    this->usr_data_pool.deallocate(usr_data.io_data); // Clean up the io data
                                     this->pending_req_count.fetch_sub(1, std::memory_order_release);
                                 }
                             }
@@ -234,7 +216,7 @@ coro_io_ctx::~coro_io_ctx() {
                     },
                     *data
                 );
-                delete data;
+                this->usr_data_pool.deallocate(data);
             }
             io_uring_cq_advance(&ring, count);
         }
