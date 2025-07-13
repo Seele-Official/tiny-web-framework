@@ -1,5 +1,8 @@
+#include <cmath>
+#include <expected>
 #include <print>
 #include <string_view>
+#include "http.h"
 #include "opts.h"
 #include "meta.h"
 #include "log.h"
@@ -32,6 +35,43 @@ int main(int argc, char* argv[]) {
             );
         }
     }
+    auto tiny_app = [](const http::query_t& query, const http::header_t& header) -> std::expected<handler_response, http::error_code> {
+        // Handle the GET request for /test
+        std::println("Received GET request for /test with query:");
+        if (query) {
+            auto query_parts = http::split_string_view(*query, '&');
+            for (const auto& part : query_parts) {
+                std::println("  {}", part);
+                auto key_value = http::split_string_view(part, '=');
+                if (key_value.size() == 2) {
+                    auto key = http::pct_decode(key_value[0]).value_or("error");
+                    auto value = http::pct_decode(key_value[1]).value_or("error");
+                    std::println("    Key: {}, Value: {}", key, value);
+                }
+            }
+        } else {
+            std::println("  No query");
+        }
+
+
+        std::println("Headers:");
+        for (const auto& [key, value] : header) {
+            std::println("  {}: {}", key, value);
+        }
+
+        http::res_msg res{
+            {200, "OK"},
+            {
+                {"Content-Type", "text/plain"},
+                {"X-Content-Type-Options", "nosniff"}
+            },
+            "Hello, world! This is a response from the tiny app."
+        };
+        res.reset_content_length();
+        return res;
+    };
+
+    app().GET("/tiny_app.so", tiny_app);
 
     app().run();
     return 0;

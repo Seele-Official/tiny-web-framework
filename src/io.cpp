@@ -1,12 +1,13 @@
 #include "io.h"
+#include <cstddef>
 
-fd_wrapper setup_socket(seele::net::ipv4 v4){
+fd_wrapper setup_socket(seele::net::ipv4 v4, size_t max_connections) {
     fd_wrapper fd_w = socket(PF_INET, SOCK_STREAM, 0);
     sockaddr_in addr = v4.to_sockaddr_in();
     if (bind(fd_w, (sockaddr*)&addr, sizeof(addr)) < 0) {
         return fd_wrapper(-1);
     }
-    if (listen(fd_w, SOMAXCONN) < 0) {
+    if (listen(fd_w, max_connections) < 0) {
         return fd_wrapper(-1);
     }
     return fd_w;

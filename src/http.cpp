@@ -8,7 +8,6 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
-#include <vector>
 #include "coro/co_task.h"
 #include "meta.h"
 #include "math.h"
@@ -64,6 +63,24 @@ namespace http {
         static constexpr std::array<uint8_t, 256> pct_map = gen_pct_map();
         return static_cast<char>(pct_map[(uint8_t)hex[0]] << 4 |
                                     pct_map[(uint8_t)hex[1]]);
+    }
+    std::optional<std::string> pct_decode(std::string_view str) {
+        std::string res;
+        for (auto it = str.cbegin(); it != str.cend(); ++it) {
+            if (*it == '%'){
+                if ((it + 1) != str.cend() && (it + 2) != str.cend()
+                    && is_hex_digit(it[1]) && is_hex_digit(it[2])
+                ) {
+                    res.push_back(pct_decode(it + 1));
+                    it += 2; // Skip the next two characters
+                } else {
+                    return std::nullopt;
+                }                
+            }else{
+                res.push_back(*it);
+            }
+        }
+        return res;
     }
 
 
@@ -123,17 +140,11 @@ namespace http {
         std::string res;
         for (auto it = path.cbegin(); it != path.cend(); ++it) {
             if (!is_absolute_path_char(*it)) {
-                if (*it == '%'){
-                    if ((it + 1) != path.cend() && (it + 2) != path.cend()){
-                        if (is_hex_digit(it[1]) && is_hex_digit(it[2])) {
-                            res.push_back(pct_decode(it + 1));
-                            it += 2; // Skip the next two characters
-                        } else {
-                            return std::nullopt; // Invalid percent-encoded sequence
-                        }
-                    } else {
-                        return std::nullopt;                        
-                    }
+                if (*it == '%' && (it + 1) != path.cend() && (it + 2) != path.cend()
+                    && is_hex_digit(it[1]) && is_hex_digit(it[2])
+                ) {
+                    res.push_back(pct_decode(it + 1));
+                    it += 2; // Skip the next two characters
                 } else {
                     return std::nullopt;
                 }
@@ -144,29 +155,19 @@ namespace http {
         return res;
     }
 
-    std::optional<std::string> parse_absolute_query(std::string_view path) {
-        std::string res;
-        for (auto it = path.cbegin(); it != path.cend(); ++it) {
-            if (!is_absolute_path_char(*it  && *it != '?')) {
-                if (*it == '%'){
-                    if ((it + 1) != path.cend() && (it + 2) != path.cend()){
-                        if (is_hex_digit(it[1]) && is_hex_digit(it[2])) {
-                            res.push_back(pct_decode(it + 1));
-                            it += 2; // Skip the next two characters
-                        } else {
-                            return std::nullopt; // Invalid percent-encoded sequence
-                        }
-                    } else {
-                        return std::nullopt;                        
-                    }
+    bool is_valid_absolute_query(std::string_view query){
+        for (auto it = query.cbegin(); it != query.cend(); ++it) {
+            if (!is_absolute_path_char(*it) && *it != '?') {
+                if (*it == '%' && (it + 1) != query.cend() && (it + 2) != query.cend()
+                    && is_hex_digit(it[1]) && is_hex_digit(it[2])
+                ) {
+                    it += 2; // Skip the next two characters
                 } else {
-                    return std::nullopt;
+                    return false;
                 }
-            } else {
-                res.push_back(*it);
             }
         }
-        return res;
+        return true;
     }
 
 
@@ -187,13 +188,14 @@ namespace http {
                 };
             }
             auto path = parse_absolute_path(str.substr(0, pos));
-            auto query = parse_absolute_path(str.substr(pos + 1));
-            if (!path || !query) {
+            auto query = str.substr(pos + 1);
+            auto is_query = is_valid_absolute_query(query);
+            if (!path || !is_query) {
                 return std::nullopt; // Invalid path or query
             }
             return origin_form{
                 path.value(),
-                query.value()
+                std::string(query)
             };
 
         }
@@ -295,13 +297,13 @@ namespace http {
                 co_return std::nullopt; // Invalid header format
             }
 
-            message.fields.emplace(trim_string_view(key), trim_string_view(value));
+            message.header.emplace(trim_string_view(key), trim_string_view(value));
             line_buffer.clear();
         }
 
         // Parse body if Content-Length is present
         std::string body_buffer;
-        if(auto content_length_it = message.fields.find("Content-Length"); content_length_it != message.fields.end()) {
+        if(auto content_length_it = message.header.find("Content-Length"); content_length_it != message.header.end()) {
             if (auto res = math::stoi(content_length_it->second); res.has_value()){
                 size_t content_length = res.value();
                 if (content_length > 0) {

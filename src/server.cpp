@@ -1,12 +1,14 @@
 #include "server.h"
 
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <exception>
 #include <expected>
 #include <format>
 #include <liburing/io_uring.h>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <print>
@@ -17,12 +19,10 @@
 #include <filesystem>
 #include <csignal>
 
-#include "meta.h"
 #include "coro/task.h"
 #include "log.h"
-#include "http.h"
 #include "coro_io.h"
-#include "io.h"
+#include "meta.h"
 #include "net/ipv4.h"
 
 using std::literals::operator""s;
@@ -34,16 +34,12 @@ namespace env {
     static std::filesystem::path root_path = std::filesystem::current_path() / "www";
     static net::ipv4 addr;
     static fd_wrapper fd_w;
-}
 
+    static std::unordered_map<std::string, file_mmap> file_caches{};
 
-namespace file_cache {
-    static std::mutex mutex{};
-    static std::unordered_map<std::string, file_mmap> files{};
-
-    std::expected<iovec, http::error_code> get(const std::filesystem::path& path) {
+    std::expected<iovec, http::error_code> get_file_cache(const std::filesystem::path& path) {
         auto full_path = std::filesystem::absolute(path);
-        if (auto it = files.find(path.string());it != files.end()) {
+        if (auto it = file_caches.find(path.string());it != file_caches.end()) {
             return iovec{
                 it->second.data,
                 it->second.size
@@ -51,71 +47,25 @@ namespace file_cache {
         }
         return std::unexpected{http::error_code::not_found};
     }
-    // std::expected<iovec, http::error_code> get(const std::filesystem::path& path) {
-    //     auto full_path = std::filesystem::absolute(path);
-    //     {
-    //         std::lock_guard<std::mutex> lock(mutex);
-
-    //         if (auto it = files.find(full_path.string());it != files.end()) {
-
-    //             return iovec{
-    //                 it->second.data,
-    //                 it->second.size
-    //             };
-
-    //         } else {
-    //             fd_wrapper file_fd_w(open(full_path.c_str(), O_RDONLY));
-    //             if (!file_fd_w.is_valid()) {
-    //                 if (errno == EACCES || errno == EPERM) {
-    //                     return std::unexpected{http::error_code::forbidden};
-    //                 }
-    //                 return std::unexpected{http::error_code::not_found};
-    //             }
-
-
-    //             int64_t file_size = get_file_size(file_fd_w);
-    //             if (file_size < 0) {
-    //                 log::async().error("Failed to get file size for {}", full_path.string());
-    //                 return std::unexpected{http::error_code::internal_server_error};
-    //             }
-
-    //             file_mmap f(file_size, PROT_READ, MAP_SHARED, file_fd_w, 0);
-                
-    //             iovec i{
-    //                 f.data,
-    //                 f.size
-    //             };
-
-    //             files.emplace(full_path.string(), std::move(f));
-    //             return i;
-    //         }
-    //     }
 
 
 
+    struct GET_handler {
+        void* helper_ptr;
+        auto (*handler)(void*, const http::query_t&, const http::header_t&) -> std::expected<handler_response, http::error_code>;
 
-    // }
+        inline std::expected<handler_response, http::error_code>
+        operator()(const http::query_t& query, const http::header_t& header) {
+            return handler(helper_ptr, query, header);
+        }
+    };
+    static std::unordered_map<std::string, GET_handler> get_routings;
 
 }
 
 
 
-
-struct http_file_ctx{
-    iovec_wrapper header;
-    iovec data;
-    static http_file_ctx make(const http::res_msg& msg, void* file, size_t size) {
-        http_file_ctx res{
-            {256},
-            {file, size}
-        };
-        auto it = msg.format_to(static_cast<char*>(res.header.iov_base));
-        res.header.iov_len = meta::safe_cast<size_t>(it - static_cast<char*>(res.header.iov_base));
-        return res;
-    }
-};
-
-std::expected<http_file_ctx, http::error_code> handle_get_req(const http::req_msg& req) {
+std::expected<handler_response, http::error_code> handle_file_get(const http::req_msg& req) {
 
     auto origin = std::get_if<http::origin_form>(&req.line.target);
     if (!origin) {
@@ -136,7 +86,7 @@ std::expected<http_file_ctx, http::error_code> handle_get_req(const http::req_ms
         full_path /= "index.html";
     }
 
-    if(auto ctx = file_cache::get(full_path);!ctx.has_value()){
+    if(auto ctx = env::get_file_cache(full_path);!ctx.has_value()){
         return std::unexpected{ctx.error()};
     } else {
 
@@ -164,10 +114,30 @@ std::expected<http_file_ctx, http::error_code> handle_get_req(const http::req_ms
 
 
 
+std::expected<handler_response, http::error_code> handle_req(const http::req_msg& req){
+    switch (req.line.method) {
+        case http::method_t::GET: {
+            auto origin = std::get_if<http::origin_form>(&req.line.target);            
+            if (origin) {            
+                if (auto it = env::get_routings.find(origin->path); it != env::get_routings.end()) {
+                    return it->second(origin->query, req.header);
+                }
+                return handle_file_get(req);
+            }
+            return std::unexpected{http::error_code::not_implemented};
+        }
+        break;
+        default:{
+                return std::unexpected{http::error_code::not_implemented};
+        }
+    }
+}
+
+
 
 struct send_http_error {
     http_file_ctx ctx;
-    io_link_timeout_awaiter<io_writev_awaiter> awaiter;
+    coro_io::awaiter::link_timeout<coro_io::awaiter::writev> awaiter;
 
     auto await_ready() { return awaiter.await_ready(); }
     auto await_suspend(std::coroutine_handle<> handle) {
@@ -189,8 +159,8 @@ struct send_http_error {
             (void*) content.data(),
             content.size()
         );
-        this->awaiter = io_link_timeout_awaiter{
-            io_writev_awaiter{fd, &ctx.header, 2},
+        this->awaiter = coro_io::awaiter::link_timeout{
+            coro_io::awaiter::writev{fd, &ctx.header, 2},
             200ms
         };
     }
@@ -213,8 +183,8 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
             remain = std::nullopt;
         }
         while (!parser.done()) {       
-            std::optional<io_uring_cqe> res = co_await io_link_timeout_awaiter{
-                io_read_awaiter{fd_w, read_buffer, sizeof(read_buffer)},
+            std::optional<io_uring_cqe> res = co_await coro_io::awaiter::link_timeout{
+                coro_io::awaiter::read{fd_w, read_buffer, sizeof(read_buffer)},
                 timeout
             };
             
@@ -240,7 +210,7 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
             auto& [msg, remain_opt] = result.value();
             remain = remain_opt;
 
-            if (auto it = msg.fields.find("Connection"); it != msg.fields.end()) {
+            if (auto it = msg.header.find("Connection"); it != msg.header.end()) {
                 if (it->second == "close") {
                     co_return; // Close connection immediately
                 } else if (it->second == "keep-alive") {
@@ -249,38 +219,54 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
             }
 
 
-            switch (msg.line.method) {
-                case http::method_t::GET: {
-                    auto get_res = handle_get_req(msg);
-                    if (get_res.has_value()) {
-                        std::optional<io_uring_cqe> res = co_await io_link_timeout_awaiter{
-                            io_writev_awaiter{
-                                fd_w,
-                                &get_res.value().header,
-                                2
-                            },
-                            timeout
-                        };
+            if (auto handle_res = handle_req(msg); handle_res.has_value()) {
+                if (auto file_ctx = std::get_if<http_file_ctx>(&handle_res.value()); file_ctx) {
+                    std::optional<io_uring_cqe> res = co_await coro_io::awaiter::link_timeout{
+                        coro_io::awaiter::writev{
+                            fd_w,
+                            &file_ctx->header,
+                            2
+                        },
+                        timeout
+                    };
 
-                        if (!res.has_value()) {
-                            log::async().error("Failed to send response");
-                            co_return;
-                        }
-                        if (res.value().res < 0) {
-                            log::async().error("Failed to send response: {}", strerror(-res.value().res));
-                            co_return;
-                        }
-                    } else {
-                        co_await send_http_error{fd_w, get_res.error()};
+                    if (!res.has_value()) {
+                        log::async().error("Failed to send response");
+                        co_return;
                     }
-                }
-                break;
-                default: {
-                    co_await send_http_error{fd_w, http::error_code::method_not_allowed};
+                    if (res.value().res < 0) {
+                        log::async().error("Failed to send response: {}", strerror(-res.value().res));
+                        co_return;
+                    }
+
+                } else if (auto msg_res = std::get_if<http::res_msg>(&handle_res.value()); msg_res) {
+                    std::string str = msg_res->to_string();
+
+                    std::optional<io_uring_cqe> res = co_await coro_io::awaiter::link_timeout{
+                        coro_io::awaiter::write{
+                            fd_w,
+                            str.data(),
+                            meta::safe_cast<uint32_t>(str.size())
+                        },
+                        timeout
+                    };
+
+                    if (!res.has_value()) {
+                        log::async().error("Failed to send response");
+                        co_return;
+                    }
+                    if (res.value().res < 0) {
+                        log::async().error("Failed to send response: {}", strerror(-res.value().res));
+                        co_return;
+                    }
+                } else {
+                    log::async().error("Unexpected response type");
                     co_return;
                 }
-            
+            } else {
+                co_await send_http_error{fd_w, handle_res.error()};
             }
+
         } else {
             log::async().error("Failed to parse request from {}", client_addr.toString());
             co_await send_http_error{fd_w, http::error_code::bad_request};
@@ -295,18 +281,17 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
 coro::task server_loop() {
 
     co_await coro::thread::dispatch_awaiter{};
-
     while(true){
         sockaddr_in client_addr;
         socklen_t client_addr_len = sizeof(client_addr);
 
-        std::optional<io_uring_cqe> res = co_await io_link_timeout_awaiter{
-            io_accept_awaiter{env::fd_w, (sockaddr *)&client_addr, &client_addr_len},
+        std::optional<io_uring_cqe> res = co_await coro_io::awaiter::link_timeout{
+            coro_io::awaiter::accept{env::fd_w, (sockaddr *)&client_addr, &client_addr_len},
             5s
         };
 
         if (!res.has_value()){
-            log::async().info("Accept timed out or failed");
+            log::async().info("Accept timed out");
             continue;
         }
         if (res.value().res < 0) {
@@ -318,8 +303,6 @@ coro::task server_loop() {
 
     co_return;
 }
-
-
 
 
 
@@ -346,7 +329,7 @@ struct app& app::set_root_path(std::string_view path) {
                 std::terminate();
             }
             file_mmap f(file_size, PROT_READ, MAP_SHARED, file_fd_w, 0);
-            file_cache::files.emplace(full_path.string(), std::move(f));
+            env::file_caches.emplace(full_path.string(), std::move(f));
         }
     }
     if (!std::filesystem::exists(env::root_path)) {
@@ -368,7 +351,7 @@ struct app& app::set_addr(std::string_view addr_str) {
         std::println("Failed to parse address: {}", parsed.error());
         std::terminate();
     }
-    env::fd_w = setup_socket(env::addr);
+    env::fd_w = setup_socket(env::addr, SOMAXCONN);
 
     if (!env::fd_w.is_valid()){
         std::println("Failed to create socket, error: {}", strerror(errno));
@@ -377,7 +360,17 @@ struct app& app::set_addr(std::string_view addr_str) {
     return *this;
 }
 
+struct app& app::GET(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&) -> std::expected<handler_response, http::error_code>) {
+    env::get_routings.emplace(std::string(path), env::GET_handler{helper_ptr, handler});
+    return *this;
+}
+
+
 void app::run(){
+    if (!env::addr.is_valid()){
+        std::println("Server address is not valid");
+        std::terminate();
+    }
     server_loop();
     std::signal(SIGINT, [](int) {
         std::println("Received SIGINT, stopping server...");

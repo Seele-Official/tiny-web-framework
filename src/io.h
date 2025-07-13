@@ -127,6 +127,6 @@ struct file_mmap{
 };
 
 
-fd_wrapper setup_socket(seele::net::ipv4 v4);
+fd_wrapper setup_socket(seele::net::ipv4 v4, size_t max_connections);
 
 int64_t get_file_size(const fd_wrapper& fd_w);

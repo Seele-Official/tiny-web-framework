@@ -6,6 +6,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 #include "meta.h"
 #include "coro/co_task.h"
 #include "coro/task.h"
@@ -26,11 +27,12 @@ namespace http {
         CONNECT,
         TRACE
     };     
-
+    using header_t = std::unordered_map<std::string, std::string>;
+    using query_t = std::optional<std::string>;
 
     struct origin_form{
         std::string path;
-        std::optional<std::string> query;
+        query_t query;
     };
     struct absolute_form{};
     struct authority_form{};
@@ -58,7 +60,7 @@ namespace http {
     struct req_msg {
 
         req_line line;
-        std::unordered_map<std::string, std::string> fields;
+        header_t header;
         std::optional<std::string> body;
 
 
@@ -83,17 +85,28 @@ namespace http {
         auto format_to(out_t&& out) const {
             return std::format_to(std::forward<out_t>(out), "{} {} {}\r\n", version, status_code, reason_phrase);
         }
+        std::string to_string() const {
+            return std::format("{} {} {}\r\n", version, status_code, reason_phrase);
+        }
     };
 
     struct res_msg {
         stat_line stat_l;
-        std::unordered_map<std::string, std::string> fields;
+        header_t header;
         std::optional<std::string> body;
-        
+
+        void reset_content_length() {
+            if (body.has_value()) {
+                header["Content-Length"] = std::to_string(body->size());
+            } else {
+                header.erase("Content-Length");
+            }
+        }
+
         template<typename out_t>
         auto format_to(out_t&& out) const {
             auto it = stat_l.format_to(std::forward<out_t>(out));
-            for (const auto& [key, value] : fields) {
+            for (const auto& [key, value] : header) {
                 it = std::format_to(it, "{}: {}\r\n", key, value);
             }
             it = std::format_to(it, "\r\n");
@@ -101,6 +114,20 @@ namespace http {
                 it = std::format_to(it, "{}", *body);
             }
             return it;
+        }
+
+        std::string to_string() const {
+            std::string res;
+            res.reserve(256 + body.value_or("").size());
+            res.append(stat_l.to_string());
+            for (const auto& [key, value] : header) {
+                res.append(std::format("{}: {}\r\n", key, value));
+            }
+            res.append("\r\n");
+            if (body) {
+                res.append(*body);
+            }
+            return res;
         }
     };
 
@@ -140,5 +167,9 @@ namespace http {
 
     extern error_content_map error_contents;
     extern std::unordered_map<std::string, std::string> mime_types;
+
+    std::vector<std::string_view> split_string_view(std::string_view str, std::string_view delimiter);
+    std::vector<std::string_view> split_string_view(std::string_view str, char delimiter);
+    std::optional<std::string> pct_decode(std::string_view str);
 }
 
