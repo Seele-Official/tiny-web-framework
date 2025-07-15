@@ -90,9 +90,9 @@ struct iovec_wrapper : iovec {
 struct file_mmap{
     size_t size;
     void* data;
-    file_mmap(size_t length, int prot = PROT_READ | PROT_WRITE,
-                      int flags = MAP_SHARED | MAP_ANONYMOUS, int fd = -1,
-                      off_t offset = 0) : size(length), data(mmap(nullptr, length, prot, flags, fd, offset)) {
+    file_mmap() : size(0), data(nullptr) {}
+    file_mmap(size_t length, int prot, int flags, int fd, off_t offset = 0) 
+        : size(length), data(mmap(nullptr, length, prot, flags, fd, offset)) {
         if (data == MAP_FAILED) {
             std::println("Failed to mmap file: {}", strerror(errno));
             std::terminate();

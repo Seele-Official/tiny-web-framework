@@ -36,18 +36,25 @@ void coro_io_ctx::worker(std::stop_token st){
                     auto* timeout_sqe = io_uring_get_sqe(&ring);
                     // Need to handle validation of sqe, but we assume the it's valid
                     sqe_handle(helper_ptr, sqe);
-                    auto io_data = this->usr_data_pool.allocate(
-                        io_usr_data{handle, cqe}
-                    );
+                    usr_data* io_data;
+                    do {
+                        io_data = this->usr_data_pool.allocate(
+                            io_usr_data{handle, cqe}
+                        );
+                    } while (io_data == nullptr); 
                     sqe->user_data = std::bit_cast<std::uintptr_t>(io_data);                    
                     sqe->flags |= IOSQE_IO_LINK;
+
                     io_uring_prep_link_timeout(timeout_sqe, time_out, 0);
-                    timeout_sqe->user_data = std::bit_cast<std::uintptr_t>(
-                        this->usr_data_pool.allocate(
+
+                    usr_data* timeout_data;
+                    do {
+                        timeout_data = this->usr_data_pool.allocate(
                             timeout_usr_data{io_data}
-                        )
-                    );
-                    // Also need to handle validation of usr_data_pool allocation, but we assume it's valid
+                        );
+                    } while (timeout_data == nullptr);
+                    timeout_sqe->user_data = std::bit_cast<std::uintptr_t>(timeout_data);
+
                     submit_count += 2;
                 } else {
                     log::async().error("Timeout link requested but time_out is null");
@@ -56,11 +63,14 @@ void coro_io_ctx::worker(std::stop_token st){
                 auto* sqe = io_uring_get_sqe(&ring);
                 // Need to handle validation of sqe, but we assume the handle is valid
                 sqe_handle(helper_ptr, sqe);
-                sqe->user_data = std::bit_cast<std::uintptr_t>(
-                    this->usr_data_pool.allocate(
+
+                usr_data* io_data;
+                do {
+                    io_data = this->usr_data_pool.allocate(
                         io_usr_data{handle, cqe}
-                    )
-                );
+                    );
+                } while (io_data == nullptr);
+                sqe->user_data = std::bit_cast<std::uintptr_t>(io_data);
                 submit_count++;
                 // Also need to handle validation of usr_data_pool allocation, but we assume it's valid
             }

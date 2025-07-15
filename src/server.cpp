@@ -102,7 +102,6 @@ std::expected<handler_response, http::error_code> handle_file_get(const http::re
                 {
                     {"Content-Type", content_type},
                     {"X-Content-Type-Options", "nosniff"},
-                    {"Content-Length", std::to_string(ctx.value().iov_len)},
                 },
                 std::nullopt
             }, 
@@ -152,7 +151,6 @@ struct send_http_error {
                 {
                     {"Content-Type", "text/html; charset=utf-8"},
                     {"X-Content-Type-Options", "nosniff"},
-                    {"Content-Length", std::to_string(content.size())}
                 },
                 std::nullopt
             },

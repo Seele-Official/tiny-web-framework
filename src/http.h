@@ -95,12 +95,15 @@ namespace http {
         header_t header;
         std::optional<std::string> body;
 
-        void reset_content_length() {
+        void refresh_content_length() {
             if (body.has_value()) {
-                header["Content-Length"] = std::to_string(body->size());
+                header.insert_or_assign("Content-Length", std::to_string(body->size()));
             } else {
                 header.erase("Content-Length");
             }
+        }
+        void refresh_content_length(size_t size) {
+            header.insert_or_assign("Content-Length", std::to_string(size));
         }
 
         template<typename out_t>
