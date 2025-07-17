@@ -113,7 +113,7 @@ std::expected<handler_response, http::error_code> handle_file_get(const http::re
 
 
 
-std::expected<handler_response, http::error_code> handle_req(const http::req_msg& req){
+std::expected<handler_response, http::error_code> handle_req(const http::req_msg& req, net::ipv4 addr){
     switch (req.line.method) {
         case http::method_t::GET: {
             auto origin = std::get_if<http::origin_form>(&req.line.target);            
@@ -121,6 +121,7 @@ std::expected<handler_response, http::error_code> handle_req(const http::req_msg
                 if (auto it = env::get_routings.find(origin->path); it != env::get_routings.end()) {
                     return it->second(origin->query, req.header);
                 }
+                log::async().info("Handling file GET request from {} for path: {}", addr.toString(), origin->path);
                 return handle_file_get(req);
             }
             return std::unexpected{http::error_code::not_implemented};
@@ -187,13 +188,13 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
             };
             
             if (!res.has_value()) {
-                log::async().warn("Read timed out");
+                log::async().warn("Read timed out for {}", client_addr.toString());
                 co_return;
             }
 
             auto bytes_read = res.value().res;
             if (bytes_read == 0) {
-                log::async().warn("Connection closed by client");
+                log::async().warn("Connection closed by client {}", client_addr.toString());
                 co_return;
             }
             if (bytes_read < 0) {
@@ -217,8 +218,11 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
             }
 
 
-            if (auto handle_res = handle_req(msg); handle_res.has_value()) {
+            if (auto handle_res = handle_req(msg, client_addr); handle_res.has_value()) {
                 if (auto file_ctx = std::get_if<http_file_ctx>(&handle_res.value()); file_ctx) {
+
+                    uint32_t total_size = file_ctx->size();
+                    uint32_t sent_size = 0;                    
                     std::optional<io_uring_cqe> res = co_await coro_io::awaiter::link_timeout{
                         coro_io::awaiter::writev{
                             fd_w,
@@ -227,36 +231,58 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
                         },
                         timeout
                     };
-
-                    if (!res.has_value()) {
-                        log::async().error("Failed to send response");
+                    
+                    if (!res.has_value() || res.value().res <= 0) {
+                        log::async().error("Failed to send response header for {} : {}", 
+                                           client_addr.toString(), 
+                                           res.has_value() ? strerror(-res.value().res) : "timeout");
                         co_return;
                     }
-                    if (res.value().res < 0) {
-                        log::async().error("Failed to send response: {}", strerror(-res.value().res));
-                        co_return;
-                    }
+                    sent_size += res.value().res;
 
+                    while (sent_size < total_size) {
+                        auto offset = file_ctx->offset_of(sent_size);
+                        res = co_await coro_io::awaiter::link_timeout{
+                            coro_io::awaiter::writev{
+                                fd_w,
+                                &offset,
+                                1
+                            },
+                            timeout
+                        };
+                        if (!res.has_value() || res.value().res <= 0) {
+                            log::async().error("Failed to send file data for {} : {}", 
+                                               client_addr.toString(), 
+                                               res.has_value() ? strerror(-res.value().res) : "timeout");
+                            co_return;
+                        }
+                        sent_size += res.value().res;
+                    }
                 } else if (auto msg_res = std::get_if<http::res_msg>(&handle_res.value()); msg_res) {
                     std::string str = msg_res->to_string();
+                    uint32_t total_size = static_cast<uint32_t>(str.size());
+                    uint32_t sent_size = 0;
+                    while (sent_size < total_size) {
+                        auto offset = str.data() + sent_size;
+                        auto remaining_size = total_size - sent_size;
+                        std::optional<io_uring_cqe> res = co_await coro_io::awaiter::link_timeout{
+                            coro_io::awaiter::write{
+                                fd_w,
+                                offset,
+                                remaining_size
+                            },
+                            timeout
+                        };
 
-                    std::optional<io_uring_cqe> res = co_await coro_io::awaiter::link_timeout{
-                        coro_io::awaiter::write{
-                            fd_w,
-                            str.data(),
-                            meta::safe_cast<uint32_t>(str.size())
-                        },
-                        timeout
-                    };
+                        if (!res.has_value() || res.value().res <= 0) {
+                            log::async().error("Failed to send response header for {} : {}", 
+                                            client_addr.toString(), 
+                                            res.has_value() ? strerror(-res.value().res) : "timeout");
+                            co_return;
+                        }
+                        sent_size += res.value().res;
+                    }
 
-                    if (!res.has_value()) {
-                        log::async().error("Failed to send response");
-                        co_return;
-                    }
-                    if (res.value().res < 0) {
-                        log::async().error("Failed to send response: {}", strerror(-res.value().res));
-                        co_return;
-                    }
                 } else {
                     log::async().error("Unexpected response type");
                     co_return;
@@ -325,6 +351,10 @@ struct app& app::set_root_path(std::string_view path) {
             if (file_size < 0) {
                 std::println("Failed to get file size for {}", full_path.string());
                 std::terminate();
+            }
+            if (file_size == 0) {
+                std::println("File is empty: {}", full_path.string());
+                continue;
             }
             file_mmap f(file_size, PROT_READ, MAP_SHARED, file_fd_w, 0);
             env::file_caches.emplace(full_path.string(), std::move(f));

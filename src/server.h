@@ -1,5 +1,8 @@
 #pragma once
+#include <bits/types/struct_iovec.h>
 #include <concepts>
+#include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <optional>
 #include <string_view>
@@ -33,6 +36,19 @@ struct http_file_ctx{
         res.header.iov_len = seele::meta::safe_cast<size_t>(it - static_cast<char*>(res.header.iov_base));
         return res;
     }
+
+    uint32_t size() const {
+        return static_cast<uint32_t>(header.iov_len + data.iov_len);
+    }
+    iovec offset_of(size_t offset) {
+        if (offset < header.iov_len) {
+            return {static_cast<std::byte*>(header.iov_base) + offset, data.iov_len + header.iov_len - offset};
+        } else {
+            auto offset_in_data = offset - header.iov_len;
+            return {static_cast<std::byte*>(data.iov_base) + offset_in_data, data.iov_len - offset_in_data};
+        }
+    }
+
 };
 
 using handler_response = std::variant<http::res_msg, http_file_ctx>;

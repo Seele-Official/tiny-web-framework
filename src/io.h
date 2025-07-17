@@ -95,6 +95,8 @@ struct file_mmap{
         : size(length), data(mmap(nullptr, length, prot, flags, fd, offset)) {
         if (data == MAP_FAILED) {
             std::println("Failed to mmap file: {}", strerror(errno));
+            std::println("Parameters: length={}, prot={}, flags={}, fd={}, offset={}", 
+                         length, prot, flags, fd, offset);
             std::terminate();
         }
     }
