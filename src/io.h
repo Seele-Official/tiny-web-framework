@@ -48,7 +48,11 @@ struct fd_wrapper {
     operator int() const {
         return fd;
     }
-
+    int release() {
+        int temp = fd;
+        fd = -1; // Prevent the destructor from closing the fd
+        return temp;
+    }
     bool is_valid() const {
         return fd >= 0;
     }

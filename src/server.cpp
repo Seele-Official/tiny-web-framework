@@ -15,6 +15,7 @@
 #include <string>
 #include <cstddef>
 #include <string_view>
+#include <unistd.h>
 #include <unordered_map>
 #include <filesystem>
 #include <csignal>
@@ -313,11 +314,10 @@ coro::task server_loop() {
             coro_io::awaiter::accept{env::fd_w, (sockaddr *)&client_addr, &client_addr_len},
             5s
         };
-
         if (!res.has_value()){
-            log::async().info("Accept timed out");
             continue;
         }
+        
         if (res.value().res < 0) {
             log::async().error("Accept failed: {}", strerror(-res.value().res));
             break;

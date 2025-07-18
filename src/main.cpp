@@ -12,6 +12,7 @@
 #include "meta.h"
 #include "log.h"
 #include "server.h"
+#include "basic.h"
 
 using namespace seele;
 
@@ -21,9 +22,9 @@ using str_map = std::unordered_map<std::string, std::string>;
 
 std::optional<str_map> parse_query(const std::string& query) {
     str_map result;
-    auto parts = http::split_string_view(query, '&');
+    auto parts = basic::split_string_view(query, '&');
     for (const auto& part : parts) {
-        auto key_value = http::split_string_view(part, '=');
+        auto key_value = basic::split_string_view(part, '=');
         if (key_value.size() == 2) {
             // because server had checked if key_value[0] and key_value[1] are valid pct-encoded strings
             result.emplace(http::pct_decode(key_value[0]).value(), http::pct_decode(key_value[1]).value());

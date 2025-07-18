@@ -8,20 +8,20 @@
 namespace seele::structs {
 
 
-    // only for one consumer, one producer
+    // only for single producer single consumer use case
     template <typename T>
-    class special_object_pool {
+    class spsc_object_pool {
     public:        
         struct alignas(alignof(T)) storage_t{
             std::byte data[sizeof(T)];
         };
-        special_object_pool(size_t length) : storage(new storage_t[length + 1]), head(0), tail(0) {
+        spsc_object_pool(size_t length) : storage(new storage_t[length + 1]), head(0), tail(0) {
             free_list.reserve(length + 1);
             for (size_t i = 0; i < length + 1; ++i) {
                 free_list.push_back(storage[i].data);
             }
         }
-        ~special_object_pool() {
+        ~spsc_object_pool() {
 
             if (auto it = std::ranges::find(free_list, nullptr); it != free_list.end()) {
                 std::println("Memory leak detected in special_object_pool, object at index {} was not deallocated", it - free_list.begin());
@@ -44,7 +44,7 @@ namespace seele::structs {
 
     template <typename T>
     template <typename... args_t>
-    T* special_object_pool<T>::allocate(args_t&&... args) {
+    T* spsc_object_pool<T>::allocate(args_t&&... args) {
         size_t idx = tail.load(std::memory_order_acquire);
         size_t next_idx = (idx + 1) % free_list.size();
         
@@ -59,7 +59,7 @@ namespace seele::structs {
     }
 
     template <typename T>
-    void special_object_pool<T>::deallocate(T* obj) {
+    void spsc_object_pool<T>::deallocate(T* obj) {
         obj->~T();
         free_list[head] = static_cast<void*>(obj); // Add back to free list
         head.store((head.load(std::memory_order_acquire) + 1) % free_list.size(), std::memory_order_release);

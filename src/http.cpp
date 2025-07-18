@@ -11,17 +11,14 @@
 #include "coro/co_task.h"
 #include "meta.h"
 #include "math.h"
+#include "basic.h"
+using namespace seele;
 namespace http {
     using std::literals::operator""s;
     using std::literals::operator""ms;
 
 
-    constexpr bool is_hex_digit(char c) {
-        return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f');
-    }
-
-
-    constexpr std::array<bool, 256> gen_tchar_map(){
+    constexpr std::array<bool, 256> tchar_helper_map(){
         std::array<bool, 256> tchar_map{};
         for (auto& c :"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&'*+-.^_`|~"){
             tchar_map[static_cast<unsigned char>(c)] = true;
@@ -30,11 +27,11 @@ namespace http {
     }
 
     constexpr bool is_tchar(char c) {
-        static constexpr std::array<bool, 256> tchar_map = gen_tchar_map();
+        constexpr std::array<bool, 256> tchar_map = tchar_helper_map();
         return tchar_map[static_cast<unsigned char>(c)];
     }
 
-    constexpr std::array<bool, 256> gen_absolute_path_char_map(){
+    constexpr std::array<bool, 256> absolute_path_char_helper_map(){
         std::array<bool, 256> char_map{};
         for (auto& c :"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-._~!$&'()*+,;=:@/"){
             char_map[static_cast<unsigned char>(c)] = true;
@@ -43,33 +40,20 @@ namespace http {
     }
 
     constexpr bool is_absolute_path_char(char c){
-        static constexpr std::array<bool, 256> char_map = gen_absolute_path_char_map();
+        constexpr std::array<bool, 256> char_map = absolute_path_char_helper_map();
         return char_map[static_cast<unsigned char>(c)];
     }
 
-    constexpr std::array<uint8_t, 256> gen_pct_map(){
-        std::array<uint8_t, 256> map{};
-        map.fill(0xFF);
-        map['0'] = 0x00; map['1'] = 0x01; map['2'] = 0x02; map['3'] = 0x03;
-        map['4'] = 0x04; map['5'] = 0x05; map['6'] = 0x06; map['7'] = 0x07;
-        map['8'] = 0x08; map['9'] = 0x09; map['A'] = 0x0A; map['B'] = 0x0B;
-        map['C'] = 0x0C; map['D'] = 0x0D; map['E'] = 0x0E; map['F'] = 0x0F;
-        map['a'] = 0x0A; map['b'] = 0x0B; map['c'] = 0x0C; map['d'] = 0x0D;
-        map['e'] = 0x0E; map['f'] = 0x0F;
-        return map;
-    }
-
     constexpr char pct_decode(const char* hex) {
-        static constexpr std::array<uint8_t, 256> pct_map = gen_pct_map();
-        return static_cast<char>(pct_map[(uint8_t)hex[0]] << 4 |
-                                    pct_map[(uint8_t)hex[1]]);
+        return static_cast<char>(basic::hex_to_int(hex[0]) << 4 | 
+                                    basic::hex_to_int(hex[1]));
     }
     std::optional<std::string> pct_decode(std::string_view str) {
         std::string res;
         for (auto it = str.cbegin(); it != str.cend(); ++it) {
             if (*it == '%'){
                 if ((it + 1) != str.cend() && (it + 2) != str.cend()
-                    && is_hex_digit(it[1]) && is_hex_digit(it[2])
+                    && basic::is_hex_digit(it[1]) && basic::is_hex_digit(it[2])
                 ) {
                     res.push_back(pct_decode(it + 1));
                     it += 2; // Skip the next two characters
@@ -91,36 +75,6 @@ namespace http {
 
     constexpr std::string_view CRLF = "\r\n";
 
-
-    std::vector<std::string_view> split_string_view(std::string_view str, std::string_view delimiter) {
-        std::vector<std::string_view> result;
-        size_t pos = 0;
-        while (true) {
-            size_t next_pos = str.find(delimiter, pos);
-            if (next_pos == std::string_view::npos) {
-                result.push_back(str.substr(pos));
-                break;
-            }
-            result.push_back(str.substr(pos, next_pos - pos));
-            pos = next_pos + delimiter.size();
-        }
-        return result;
-    }
-    std::vector<std::string_view> split_string_view(std::string_view str, char delimiter) {
-        std::vector<std::string_view> result;
-        size_t pos = 0;
-        while (true) {
-            size_t next_pos = str.find(delimiter, pos);
-            if (next_pos == std::string_view::npos) {
-                result.push_back(str.substr(pos));
-                break;
-            }
-            result.push_back(str.substr(pos, next_pos - pos));
-            pos = next_pos + 1;
-        }
-        return result;
-    }
-
     template <typename lambda_t>
         requires std::is_same_v<bool, std::invoke_result_t<lambda_t, char>>
     std::string_view parse_token(std::string_view str, lambda_t&& is_valid) {
@@ -141,7 +95,7 @@ namespace http {
         for (auto it = path.cbegin(); it != path.cend(); ++it) {
             if (!is_absolute_path_char(*it)) {
                 if (*it == '%' && (it + 1) != path.cend() && (it + 2) != path.cend()
-                    && is_hex_digit(it[1]) && is_hex_digit(it[2])
+                    && basic::is_hex_digit(it[1]) && basic::is_hex_digit(it[2])
                 ) {
                     res.push_back(pct_decode(it + 1));
                     it += 2; // Skip the next two characters
@@ -159,7 +113,7 @@ namespace http {
         for (auto it = query.cbegin(); it != query.cend(); ++it) {
             if (!is_absolute_path_char(*it) && *it != '?') {
                 if (*it == '%' && (it + 1) != query.cend() && (it + 2) != query.cend()
-                    && is_hex_digit(it[1]) && is_hex_digit(it[2])
+                    && basic::is_hex_digit(it[1]) && basic::is_hex_digit(it[2])
                 ) {
                     it += 2; // Skip the next two characters
                 } else {
@@ -250,7 +204,7 @@ namespace http {
         // Parse request line
         get_line()
 
-        auto req_line_parts = split_string_view(line_view, SP);
+        auto req_line_parts = basic::split_string_view(line_view, SP);
         if (req_line_parts.size() != 3) {
             co_return std::nullopt;
         }

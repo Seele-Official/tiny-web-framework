@@ -171,8 +171,6 @@ namespace http {
     extern error_content_map error_contents;
     extern std::unordered_map<std::string, std::string> mime_types;
 
-    std::vector<std::string_view> split_string_view(std::string_view str, std::string_view delimiter);
-    std::vector<std::string_view> split_string_view(std::string_view str, char delimiter);
     std::optional<std::string> pct_decode(std::string_view str);
 }
 

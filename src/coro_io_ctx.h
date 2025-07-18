@@ -11,7 +11,7 @@
 #include <stop_token>
 #include <cstring>
 #include "structs/ms_queue_chunk.h"
-#include "structs/special_object_pool.h"
+#include "structs/spsc_object_pool.h"
 constexpr size_t submit_threshold = 64;
 
 class coro_io_ctx{
@@ -78,6 +78,6 @@ private:
     std::counting_semaphore<> unp_sem;
     seele::structs::ms_queue_chunk<request> unprocessed_requests;
 
-    seele::structs::special_object_pool<usr_data> usr_data_pool;
+    seele::structs::spsc_object_pool<usr_data> usr_data_pool;
 
 };
