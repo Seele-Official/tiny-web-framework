@@ -10,7 +10,7 @@
 #include <type_traits>
 #include <stop_token>
 #include <cstring>
-#include "structs/ms_queue_chunk.h"
+#include "structs/mpsc_queue.h"
 #include "structs/spsc_object_pool.h"
 constexpr size_t submit_threshold = 64;
 
@@ -76,7 +76,7 @@ private:
     std::atomic<size_t> pending_req_count;
 
     std::counting_semaphore<> unp_sem;
-    seele::structs::ms_queue_chunk<request> unprocessed_requests;
+    seele::structs::mpsc_queue<request> unprocessed_requests;
 
     seele::structs::spsc_object_pool<usr_data> usr_data_pool;
 

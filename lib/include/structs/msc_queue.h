@@ -11,7 +11,7 @@
 namespace seele::structs {
 
     template<typename T, size_t MAX_NODES = 64>
-    struct chunk{
+    struct msc_chunk{
         struct node_t{
             enum status_t {
                 EMPTY,
@@ -27,19 +27,19 @@ namespace seele::structs {
         node_t data[MAX_NODES];
         std::atomic<size_t> read_index;
         std::atomic<size_t> write_index;
-        std::atomic<chunk*> next;
-        chunk() : data{}, read_index(0), write_index(0), next(nullptr) {}
+        std::atomic<msc_chunk*> next;
+        msc_chunk() : data{}, read_index(0), write_index(0), next(nullptr) {}
 
         std::optional<T> pop_front();
 
         template<typename... args_t>
         bool emplace_back(args_t&&... args);
 
-        ~chunk();
+        ~msc_chunk();
     };
 
     template<typename T, size_t MAX_NODES>
-    std::optional<T> chunk<T, MAX_NODES>::pop_front(){
+    std::optional<T> msc_chunk<T, MAX_NODES>::pop_front(){
         while (true) {
             size_t read_idx = read_index.load(std::memory_order_acquire);
             size_t write_idx = write_index.load(std::memory_order_acquire);
@@ -50,8 +50,6 @@ namespace seele::structs {
             if (this->read_index.compare_exchange_strong(read_idx, read_idx + 1, std::memory_order_release, std::memory_order_relaxed)) {
                 while (data[read_idx].status.load(std::memory_order_acquire) != node_t::READY) {
                     // wait until the data is ready
-                    std::this_thread::yield();
-                
                 }
 
                 T result = std::move(data[read_idx].data);
@@ -64,7 +62,7 @@ namespace seele::structs {
 
     template<typename T, size_t MAX_NODES>
     template<typename... args_t>
-    bool chunk<T, MAX_NODES>::emplace_back(args_t&&... args) {
+    bool msc_chunk<T, MAX_NODES>::emplace_back(args_t&&... args) {
 
         while (true) {
             size_t write_idx = write_index.load(std::memory_order_acquire);
@@ -80,7 +78,7 @@ namespace seele::structs {
         }
     }
     template<typename T, size_t MAX_NODES>
-    chunk<T, MAX_NODES>::~chunk(){
+    msc_chunk<T, MAX_NODES>::~msc_chunk(){
 
         auto view = data
             | std::views::drop(read_index.load(std::memory_order_acquire))
@@ -96,13 +94,13 @@ namespace seele::structs {
 
 
     template <typename T, size_t N = 64>
-    class ms_queue_chunk {
+    class msc_queue {
     private:
-        using chunk_t = chunk<T, N>;
+        using chunk_t = msc_chunk<T, N>;
 
     public:
-        ms_queue_chunk();
-        ~ms_queue_chunk();
+        msc_queue();
+        ~msc_queue();
 
         void push_back(const T& item) { emplace_back(item); }
 
@@ -123,14 +121,14 @@ namespace seele::structs {
 
 
     template <typename T, size_t N>
-    ms_queue_chunk<T, N>::ms_queue_chunk(){
+    msc_queue<T, N>::msc_queue(){
         chunk_t* dummy = new chunk_t();
         head_chunk.store(dummy, std::memory_order_relaxed);
         tail_chunk.store(dummy, std::memory_order_relaxed);
     }
 
     template <typename T, size_t N>
-    ms_queue_chunk<T, N>::~ms_queue_chunk() {
+    msc_queue<T, N>::~msc_queue() {
         chunk_t* current = head_chunk.load(std::memory_order_relaxed);
         while (current) {
             chunk_t* next = current->next.load(std::memory_order_relaxed);
@@ -141,7 +139,7 @@ namespace seele::structs {
 
     template <typename T, size_t N>
     template<typename... args_t>
-    void ms_queue_chunk<T, N>::emplace_back(args_t&&... args) {
+    void msc_queue<T, N>::emplace_back(args_t&&... args) {
 
         constexpr std::size_t HAZ_TAIL = 0;
 
@@ -200,7 +198,7 @@ namespace seele::structs {
     }
 
     template <typename T, size_t N>
-    std::optional<T> ms_queue_chunk<T, N>::pop_front() {
+    std::optional<T> msc_queue<T, N>::pop_front() {
         constexpr std::size_t HAZ_HEAD = 0;
         constexpr std::size_t HAZ_NEXT = 1;
 

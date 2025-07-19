@@ -17,7 +17,7 @@ namespace seele::structs {
 
 
 
-    hazard_record_t* hazard_manager::allocate_record(){
+    hazard_manager::hazard_record_t* hazard_manager::allocate_record(){
         for (auto& record : records) {
             bool expected = false;
             if (record.active.compare_exchange_strong(expected, true, std::memory_order_acquire)) {
@@ -32,7 +32,7 @@ namespace seele::structs {
         record->active.store(false, std::memory_order_release);
     }
 
-    tls_data_t& hazard_manager::local_tls() {
+    hazard_manager::tls_data_t& hazard_manager::local_tls() {
         auto it = tls_map.find(this);
         if (it != tls_map.end()) {
             return it->second;
@@ -45,7 +45,7 @@ namespace seele::structs {
     void hazard_manager::collect_thread_unretired(std::list<retired_ptr_t>& retireds){
         std::lock_guard<std::mutex> lock(g_retired_mutex);
         this->g_retired.splice(g_retired.end(), retireds);
-        if (g_retired.size() > max_retired_count) {
+        if (g_retired.size() > hp::max_retired_count) {
             this->scan_retired(g_retired);
         }
         
@@ -57,7 +57,7 @@ namespace seele::structs {
             | std::views::filter([](hazard_record_t& rec) {
                 return rec.active.load(std::memory_order_acquire);
             })
-            | std::views::transform([](hazard_record_t& rec) -> std::array<std::atomic<void*>, max_hazard_count>& {
+            | std::views::transform([](hazard_record_t& rec) -> std::array<std::atomic<void*>, hp::max_hazard_count>& {
                 return rec.hps;
             })
             | std::views::join;
@@ -87,7 +87,7 @@ namespace seele::structs {
 
     void hazard_manager::scan_tls_retired() {
         auto& r = local_tls().retired_list;
-        if (r.size() > max_retired_count) {
+        if (r.size() > hp::max_retired_count) {
             this->scan_retired(r);
         }
     }

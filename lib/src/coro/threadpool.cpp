@@ -3,7 +3,7 @@
 namespace seele::coro::thread {
 
     thread_pool_impl& thread_pool_impl::get_instance(){
-        static thread_pool_impl instance{3};
+        static thread_pool_impl instance{5};
         return instance;
     } 
 
