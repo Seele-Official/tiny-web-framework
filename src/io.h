@@ -91,11 +91,11 @@ struct iovec_wrapper : iovec {
 };
 
 
-struct file_mmap{
+struct mmap_wrapper{
     size_t size;
     void* data;
-    file_mmap() : size(0), data(nullptr) {}
-    file_mmap(size_t length, int prot, int flags, int fd, off_t offset = 0) 
+    mmap_wrapper() : size(0), data(nullptr) {}
+    mmap_wrapper(size_t length, int prot, int flags, int fd, off_t offset = 0) 
         : size(length), data(mmap(nullptr, length, prot, flags, fd, offset)) {
         if (data == MAP_FAILED) {
             std::println("Failed to mmap file: {}", strerror(errno));
@@ -105,12 +105,12 @@ struct file_mmap{
         }
     }
 
-    file_mmap(const file_mmap&) = delete;
-    file_mmap(file_mmap&& other) noexcept : size(other.size), data(other.data) {
+    mmap_wrapper(const mmap_wrapper&) = delete;
+    mmap_wrapper(mmap_wrapper&& other) noexcept : size(other.size), data(other.data) {
         other.data = nullptr;
         other.size = 0;
     }
-    file_mmap& operator=(file_mmap&& other) noexcept {
+    mmap_wrapper& operator=(mmap_wrapper&& other) noexcept {
         if (this != &other) {
             if (data) {
                 munmap(data, size);
@@ -123,9 +123,9 @@ struct file_mmap{
         return *this;
     }
 
-    file_mmap& operator=(const file_mmap&) = delete;
+    mmap_wrapper& operator=(const mmap_wrapper&) = delete;
 
-    ~file_mmap(){
+    ~mmap_wrapper(){
         if (data) {
             munmap(data, size);
         }

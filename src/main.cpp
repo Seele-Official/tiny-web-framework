@@ -71,7 +71,7 @@ public:
             f.size
         );
     };
-    file_mmap f;
+    mmap_wrapper f;
 
     TinyApp(int fd, size_t size): f(size, PROT_READ, MAP_SHARED, fd) {}
 };

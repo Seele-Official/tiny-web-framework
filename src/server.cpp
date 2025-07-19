@@ -21,6 +21,7 @@
 #include <csignal>
 
 #include "coro/task.h"
+#include "io.h"
 #include "log.h"
 #include "coro_io.h"
 #include "meta.h"
@@ -36,7 +37,7 @@ namespace env {
     static net::ipv4 addr;
     static fd_wrapper fd_w;
 
-    static std::unordered_map<std::string, file_mmap> file_caches{};
+    static std::unordered_map<std::string, mmap_wrapper> file_caches{};
 
     std::expected<iovec, http::error_code> get_file_cache(const std::filesystem::path& path) {
         auto full_path = std::filesystem::absolute(path);
@@ -114,7 +115,7 @@ std::expected<handler_response, http::error_code> handle_file_get(const http::re
 
 
 
-std::expected<handler_response, http::error_code> handle_req(const http::req_msg& req, net::ipv4 addr){
+std::expected<handler_response, http::error_code> handle_req(const http::req_msg& req){
     switch (req.line.method) {
         case http::method_t::GET: {
             auto origin = std::get_if<http::origin_form>(&req.line.target);            
@@ -122,7 +123,6 @@ std::expected<handler_response, http::error_code> handle_req(const http::req_msg
                 if (auto it = env::get_routings.find(origin->path); it != env::get_routings.end()) {
                     return it->second(origin->query, req.header);
                 }
-                log::async().info("Handling file GET request from {} for path: {}", addr.toString(), origin->path);
                 return handle_file_get(req);
             }
             return std::unexpected{http::error_code::not_implemented};
@@ -219,7 +219,7 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
             }
 
 
-            if (auto handle_res = handle_req(msg, client_addr); handle_res.has_value()) {
+            if (auto handle_res = handle_req(msg); handle_res.has_value()) {
                 if (auto file_ctx = std::get_if<http_file_ctx>(&handle_res.value()); file_ctx) {
 
                     uint32_t total_size = file_ctx->size();
@@ -356,8 +356,7 @@ struct app& app::set_root_path(std::string_view path) {
                 std::println("File is empty: {}", full_path.string());
                 continue;
             }
-            file_mmap f(file_size, PROT_READ, MAP_SHARED, file_fd_w, 0);
-            env::file_caches.emplace(full_path.string(), std::move(f));
+            env::file_caches.emplace(full_path.string(), mmap_wrapper(file_size, PROT_READ, MAP_SHARED, file_fd_w, 0));
         }
     }
     if (!std::filesystem::exists(env::root_path)) {
