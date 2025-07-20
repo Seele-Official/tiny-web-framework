@@ -182,8 +182,8 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
             parser.send_and_resume(remain.value());
             remain = std::nullopt;
         }
-        while (!parser.done()) {       
-            std::optional<io_uring_cqe> res = co_await coro_io::awaiter::link_timeout{
+        while (!parser.done()) {
+            std::optional<int32_t> res = co_await coro_io::awaiter::link_timeout{
                 coro_io::awaiter::read{fd_w, read_buffer, sizeof(read_buffer)},
                 timeout
             };
@@ -193,7 +193,7 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
                 co_return;
             }
 
-            auto bytes_read = res.value().res;
+            auto bytes_read = res.value();
             if (bytes_read == 0) {
                 log::async().warn("Connection closed by client {}", client_addr.toString());
                 co_return;
@@ -223,8 +223,8 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
                 if (auto file_ctx = std::get_if<http_file_ctx>(&handle_res.value()); file_ctx) {
 
                     uint32_t total_size = file_ctx->size();
-                    uint32_t sent_size = 0;                    
-                    std::optional<io_uring_cqe> res = co_await coro_io::awaiter::link_timeout{
+                    uint32_t sent_size = 0;
+                    std::optional<int32_t> res = co_await coro_io::awaiter::link_timeout{
                         coro_io::awaiter::writev{
                             fd_w,
                             &file_ctx->header,
@@ -232,14 +232,14 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
                         },
                         timeout
                     };
-                    
-                    if (!res.has_value() || res.value().res <= 0) {
+
+                    if (!res.has_value() || res.value() <= 0) {
                         log::async().error("Failed to send response header for {} : {}", 
                                            client_addr.toString(), 
-                                           res.has_value() ? strerror(-res.value().res) : "timeout");
+                                           res.has_value() ? strerror(-res.value()) : "timeout");
                         co_return;
                     }
-                    sent_size += res.value().res;
+                    sent_size += res.value();
 
                     while (sent_size < total_size) {
                         auto offset = file_ctx->offset_of(sent_size);
@@ -251,13 +251,13 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
                             },
                             timeout
                         };
-                        if (!res.has_value() || res.value().res <= 0) {
+                        if (!res.has_value() || res.value() <= 0) {
                             log::async().error("Failed to send file data for {} : {}", 
                                                client_addr.toString(), 
-                                               res.has_value() ? strerror(-res.value().res) : "timeout");
+                                               res.has_value() ? strerror(-res.value()) : "timeout");
                             co_return;
                         }
-                        sent_size += res.value().res;
+                        sent_size += res.value();
                     }
                 } else if (auto msg_res = std::get_if<http::res_msg>(&handle_res.value()); msg_res) {
                     std::string str = msg_res->to_string();
@@ -266,7 +266,7 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
                     while (sent_size < total_size) {
                         auto offset = str.data() + sent_size;
                         auto remaining_size = total_size - sent_size;
-                        std::optional<io_uring_cqe> res = co_await coro_io::awaiter::link_timeout{
+                        std::optional<int32_t> res = co_await coro_io::awaiter::link_timeout{
                             coro_io::awaiter::write{
                                 fd_w,
                                 offset,
@@ -275,13 +275,13 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
                             timeout
                         };
 
-                        if (!res.has_value() || res.value().res <= 0) {
+                        if (!res.has_value() || res.value() <= 0) {
                             log::async().error("Failed to send response header for {} : {}", 
                                             client_addr.toString(), 
-                                            res.has_value() ? strerror(-res.value().res) : "timeout");
+                                            res.has_value() ? strerror(-res.value()) : "timeout");
                             co_return;
                         }
-                        sent_size += res.value().res;
+                        sent_size += res.value();
                     }
 
                 } else {
@@ -310,7 +310,7 @@ coro::task server_loop() {
         sockaddr_in client_addr;
         socklen_t client_addr_len = sizeof(client_addr);
 
-        std::optional<io_uring_cqe> res = co_await coro_io::awaiter::link_timeout{
+        std::optional<int32_t> res = co_await coro_io::awaiter::link_timeout{
             coro_io::awaiter::accept{env::fd_w, (sockaddr *)&client_addr, &client_addr_len},
             5s
         };
@@ -318,11 +318,11 @@ coro::task server_loop() {
             continue;
         }
         
-        if (res.value().res < 0) {
-            log::async().error("Accept failed: {}", strerror(-res.value().res));
+        if (res.value() < 0) {
+            log::async().error("Accept failed: {}", strerror(-res.value()));
             break;
         }
-        async_handle_connection(res.value().res, net::ipv4::from_sockaddr_in(client_addr));
+        async_handle_connection(res.value(), net::ipv4::from_sockaddr_in(client_addr));
     }
 
     co_return;
@@ -378,7 +378,7 @@ struct app& app::set_addr(std::string_view addr_str) {
         std::println("Failed to parse address: {}", parsed.error());
         std::terminate();
     }
-    env::fd_w = setup_socket(env::addr, SOMAXCONN);
+    env::fd_w = setup_socket(env::addr, 10240);
 
     if (!env::fd_w.is_valid()){
         std::println("Failed to create socket, error: {}", strerror(errno));

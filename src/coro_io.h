@@ -1,7 +1,11 @@
 #pragma once
 #include <coroutine>
+#include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <liburing.h>
+#include <liburing/io_uring.h>
+#include <new>
 #include <optional>
 #include <tuple>
 #include <errno.h>
@@ -11,14 +15,35 @@
 
 
 namespace coro_io::awaiter {
+
+    // Because in higher versions of liburing, support CQE32 feature
+    // CQE32 has flexible array member, which can not be used as a member of a class
+    // So we use a wrapper to hold the cqe, and use placement new to construct
+    // the cqe in the storage.
+    struct cqe_wrapper{
+        alignas(io_uring_cqe) std::byte storage[32];
+        cqe_wrapper() {
+            new (storage) io_uring_cqe(); 
+        }
+        inline io_uring_cqe* cqe_ptr() {
+            return std::launder(reinterpret_cast<io_uring_cqe*>(storage));
+        }
+
+        inline io_uring_cqe* operator->() {
+            return this->cqe_ptr();
+        }
+    };
+
+
+
     template<typename derived>
     struct base {
-        io_uring_cqe cqe;
+        cqe_wrapper cqe;
         bool await_ready() { return false; }
         void await_suspend(std::coroutine_handle<void> handle) {
             coro_io_ctx::get_instance().submit(
                     handle,
-                    &cqe,
+                    cqe.cqe_ptr(),
                     false, 
                     nullptr, 
                     this, 
@@ -27,7 +52,7 @@ namespace coro_io::awaiter {
                     }
             );
         }
-        io_uring_cqe await_resume() { return cqe; }
+        int32_t await_resume() { return cqe->res; }
 
         void setup(io_uring_sqe* sqe) { std::terminate();} // Default setup, can be overridden by derived classes
     };
@@ -120,7 +145,7 @@ namespace coro_io::awaiter {
         void await_suspend(std::coroutine_handle<void> handle) {
             coro_io_ctx::get_instance().submit(
                     handle,
-                    &awaiter.cqe,
+                    awaiter.cqe.cqe_ptr(),
                     true, 
                     &ts, 
                     &awaiter, 
@@ -130,11 +155,11 @@ namespace coro_io::awaiter {
                 
             );
         }
-        std::optional<io_uring_cqe> await_resume() { 
-            if (awaiter.cqe.res == -ECANCELED) {
+        std::optional<int32_t> await_resume() { 
+            if (awaiter.cqe->res == -ECANCELED) {
                 return std::nullopt;
             }
-            return awaiter.cqe;
+            return awaiter.cqe->res;
         }
         link_timeout() = default;
 
