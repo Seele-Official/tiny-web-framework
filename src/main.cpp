@@ -36,9 +36,9 @@ std::optional<str_map> parse_query(const std::string& query) {
 }
 
 
-class TinyApp{
+class tiny_get_app{
 public:
-    std::expected<handler_response, http::error_code> operator()(const http::query_t& query, const http::header_t& header) {
+    expected_hdl_ret operator()(const http::query_t& query, const http::header_t& header) {
         std::println("Received GET request for /tiny_app with query:");
         if (query) {
             if (auto parsed_query = parse_query(*query); parsed_query.has_value()) {
@@ -73,7 +73,46 @@ public:
     };
     mmap_wrapper f;
 
-    TinyApp(int fd, size_t size): f(size, PROT_READ, MAP_SHARED, fd) {}
+    tiny_get_app(int fd, size_t size): f(size, PROT_READ, MAP_SHARED, fd) {}
+};
+
+class tiny_post_app{
+public:
+    expected_hdl_ret operator()(const http::query_t& query, const http::header_t& header, const http::body_t& body) {
+        std::println("Received POST request for /tiny_app with query:");
+        if (query) {
+            if (auto parsed_query = parse_query(*query); parsed_query.has_value()) {
+                for (const auto& [key, value] : parsed_query.value()) {
+                    std::println("  {}: {}", key, value);
+                }
+            } else {
+                std::println("Invalid query format");
+                return std::unexpected(http::error_code::bad_request);
+            }
+        } else {
+            std::println("No query");
+        }
+
+        std::println("Headers:");
+        for (const auto& [key, value] : header) {
+            std::println("  {}: {}", key, value);
+        }
+        if (body) {
+            std::println("Body: {}", *body);
+        } else {
+            std::println("No body");
+        }
+        auto res = http::res_msg{
+            {200, "OK"},
+            {
+                {"Content-Type", "application/json"},
+                {"X-Content-Type-Options", "nosniff"},
+            },
+            "{\"message\": \"POST request received\"}"
+        };
+        res.refresh_content_length();
+        return res;
+    }
 };
 
 
@@ -109,9 +148,10 @@ int main(int argc, char* argv[]) {
     }
     size_t file_size = get_file_size(file_fd);
 
-    TinyApp tiny_app(file_fd, file_size);
+    tiny_get_app tiny_app(file_fd, file_size);
+    tiny_post_app tiny_post_app;
     app().GET("/tiny_app.so", tiny_app);
-
+    app().POST("/tiny_app.so", tiny_post_app);
     app().run();
     return 0;
 }

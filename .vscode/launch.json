@@ -6,7 +6,7 @@
           "type": "cppdbg",
           "request": "launch",
           "program": "${workspaceRoot}/build/web_server",
-          "args": ["-a", "127.0.0.1:8001", "-p", "${workspaceRoot}/static"],
+          "args": ["-a", "127.0.0.1:8080", "-p", "${workspaceRoot}/static"],
           "stopAtEntry": false,
           "cwd": "${workspaceRoot}/build",
           "MIMode": "gdb",

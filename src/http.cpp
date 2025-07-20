@@ -170,7 +170,7 @@ namespace http {
         return str.substr(start, end - start);
     }
 
-    coro::co_task<std::optional<parse_res>, std::string_view> req_msg::parser() {
+    coro::co_task<std::optional<parse_ret>, std::string_view> req_msg::parser() {
         req_msg message;
 
         std::string_view data;
@@ -261,13 +261,17 @@ namespace http {
             if (auto res = math::stoi(content_length_it->second); res.has_value()){
                 size_t content_length = res.value();
                 if (content_length > 0) {
-                    if (data.size() < content_length) {
-                        // Not enough data for body, wait for more
-                        body_buffer.append(data);
-                        co_wait_message data;
+                    while (body_buffer.size() < content_length) {
+                        auto need_to_read = content_length - body_buffer.size();
+                        if (need_to_read > data.size()) {
+                            body_buffer.append(data);
+                            co_wait_message data;
+                        } else {
+                            body_buffer.append(data.substr(0, need_to_read));
+                            data.remove_prefix(need_to_read);
+                        }
                     }
                     message.body = std::move(body_buffer);
-                    data.remove_prefix(content_length);
                 } else {
                     message.body = std::nullopt; // No body
                 }
@@ -278,7 +282,7 @@ namespace http {
             message.body = std::nullopt;
         }
 
-        co_return parse_res{
+        co_return parse_ret{
             std::move(message),
             data.empty() ? std::nullopt : std::make_optional(data)
         };

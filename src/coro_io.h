@@ -38,12 +38,12 @@ namespace coro_io::awaiter {
 
     template<typename derived>
     struct base {
-        cqe_wrapper cqe;
+        int32_t io_ret;
         bool await_ready() { return false; }
         void await_suspend(std::coroutine_handle<void> handle) {
             coro_io_ctx::get_instance().submit(
                     handle,
-                    cqe.cqe_ptr(),
+                    &io_ret,
                     false, 
                     nullptr, 
                     this, 
@@ -52,7 +52,7 @@ namespace coro_io::awaiter {
                     }
             );
         }
-        int32_t await_resume() { return cqe->res; }
+        int32_t await_resume() { return io_ret; }
 
         void setup(io_uring_sqe* sqe) { std::terminate();} // Default setup, can be overridden by derived classes
     };
@@ -145,7 +145,7 @@ namespace coro_io::awaiter {
         void await_suspend(std::coroutine_handle<void> handle) {
             coro_io_ctx::get_instance().submit(
                     handle,
-                    awaiter.cqe.cqe_ptr(),
+                    &awaiter.io_ret,
                     true, 
                     &ts, 
                     &awaiter, 
@@ -156,10 +156,10 @@ namespace coro_io::awaiter {
             );
         }
         std::optional<int32_t> await_resume() { 
-            if (awaiter.cqe->res == -ECANCELED) {
+            if (awaiter.io_ret == -ECANCELED) {
                 return std::nullopt;
             }
-            return awaiter.cqe->res;
+            return awaiter.io_ret;
         }
         link_timeout() = default;
 

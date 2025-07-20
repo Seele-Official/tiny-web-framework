@@ -30,6 +30,7 @@ namespace http {
     using header_t = std::unordered_map<std::string, std::string>;
     using query_t = std::optional<std::string>;
 
+    using body_t = std::optional<std::string>;
     struct origin_form{
         std::string path;
         query_t query;
@@ -56,18 +57,18 @@ namespace http {
 
     };
     
-    struct parse_res;
-    struct req_msg {
+    struct parse_ret;
 
+    struct req_msg {
         req_line line;
         header_t header;
-        std::optional<std::string> body;
+        body_t body;
 
 
-        static coro::co_task<std::optional<parse_res>, std::string_view> parser();
+        static coro::co_task<std::optional<parse_ret>, std::string_view> parser();
     };
 
-    struct parse_res{
+    struct parse_ret{
         req_msg msg;
         std::optional<std::string_view> remain; 
     };
@@ -93,7 +94,7 @@ namespace http {
     struct res_msg {
         stat_line stat_l;
         header_t header;
-        std::optional<std::string> body;
+        body_t body;
 
         void refresh_content_length() {
             if (body.has_value()) {

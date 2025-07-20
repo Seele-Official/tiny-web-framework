@@ -18,7 +18,7 @@ class coro_io_ctx{
 public:      
     struct request{        
         std::coroutine_handle<void> handle;        
-        io_uring_cqe* cqe;
+        int32_t* io_ret;
         bool is_timeout_link;
         __kernel_timespec* time_out;
         void* helper_ptr;
@@ -29,7 +29,7 @@ public:
     using usr_data = std::variant<io_usr_data, timeout_usr_data>;
     struct io_usr_data{
         std::coroutine_handle<> handle;
-        io_uring_cqe* cqe;
+        int32_t* io_ret;
     };
 
 
@@ -43,8 +43,8 @@ public:
     coro_io_ctx& operator=(const coro_io_ctx&) = delete;
     coro_io_ctx& operator=(coro_io_ctx&&) = delete;
 
-    void submit(std::coroutine_handle<void> handle, io_uring_cqe* cqe, bool is_timeout_link, __kernel_timespec* time_out, void* helper_ptr, auto (*sqe_handle)(void*, io_uring_sqe*) -> void ) {
-        this->unprocessed_requests.emplace_back(handle, cqe, is_timeout_link, time_out, helper_ptr, sqe_handle);
+    void submit(std::coroutine_handle<void> handle, int32_t* io_ret, bool is_timeout_link, __kernel_timespec* time_out, void* helper_ptr, auto (*sqe_handle)(void*, io_uring_sqe*) -> void ) {
+        this->unprocessed_requests.emplace_back(handle, io_ret, is_timeout_link, time_out, helper_ptr, sqe_handle);
         this->unp_sem.release();
     }
 

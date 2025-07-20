@@ -54,20 +54,30 @@ namespace env {
 
     struct GET_handler {
         void* helper_ptr;
-        auto (*handler)(void*, const http::query_t&, const http::header_t&) -> std::expected<handler_response, http::error_code>;
+        auto (*handler)(void*, const http::query_t&, const http::header_t&) -> expected_hdl_ret;
 
-        inline std::expected<handler_response, http::error_code>
-        operator()(const http::query_t& query, const http::header_t& header) {
+        inline expected_hdl_ret operator()(const http::query_t& query, const http::header_t& header) {
             return handler(helper_ptr, query, header);
         }
     };
-    static std::unordered_map<std::string, GET_handler> get_routings;
 
+    struct POST_handler {
+        void* helper_ptr;
+        auto (*handler)(void*, const http::query_t&, const http::header_t&, const http::body_t&) -> expected_hdl_ret;
+
+        inline expected_hdl_ret operator()(const http::query_t& query, const http::header_t& header, const http::body_t& body) {
+            return handler(helper_ptr, query, header, body);
+        }
+    };
+
+
+    static std::unordered_map<std::string, GET_handler> get_routings;
+    static std::unordered_map<std::string, POST_handler> post_routings;
 }
 
 
 
-std::expected<handler_response, http::error_code> handle_file_get(const http::req_msg& req) {
+expected_hdl_ret handle_file_get(const http::req_msg& req) {
 
     auto origin = std::get_if<http::origin_form>(&req.line.target);
     if (!origin) {
@@ -115,7 +125,7 @@ std::expected<handler_response, http::error_code> handle_file_get(const http::re
 
 
 
-std::expected<handler_response, http::error_code> handle_req(const http::req_msg& req){
+expected_hdl_ret handle_req(const http::req_msg& req){
     switch (req.line.method) {
         case http::method_t::GET: {
             auto origin = std::get_if<http::origin_form>(&req.line.target);            
@@ -128,6 +138,16 @@ std::expected<handler_response, http::error_code> handle_req(const http::req_msg
             return std::unexpected{http::error_code::not_implemented};
         }
         break;
+        case http::method_t::POST: {
+            auto origin = std::get_if<http::origin_form>(&req.line.target);
+            if (origin) {
+                if (auto it = env::post_routings.find(origin->path); it != env::post_routings.end()) {
+                    return it->second(origin->query, req.header, req.body);
+                }
+                return std::unexpected{http::error_code::not_found};
+            }
+            return std::unexpected{http::error_code::not_implemented};
+        }
         default:{
                 return std::unexpected{http::error_code::not_implemented};
         }
@@ -387,8 +407,13 @@ struct app& app::set_addr(std::string_view addr_str) {
     return *this;
 }
 
-struct app& app::GET(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&) -> std::expected<handler_response, http::error_code>) {
+struct app& app::GET(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&) -> expected_hdl_ret) {
     env::get_routings.emplace(std::string(path), env::GET_handler{helper_ptr, handler});
+    return *this;
+}
+
+struct app& app::POST(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&, const http::body_t&) -> expected_hdl_ret){
+    env::post_routings.emplace(std::string(path), env::POST_handler{helper_ptr, handler});
     return *this;
 }
 
