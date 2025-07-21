@@ -21,7 +21,7 @@ struct http_file_ctx{
             {256},
             {file, size}
         };
-        msg.refresh_content_length(size);
+        msg.set_content_length(size);
         auto it = msg.format_to(static_cast<char*>(res.header.iov_base));
         res.header.iov_len = seele::meta::safe_cast<size_t>(it - static_cast<char*>(res.header.iov_base));
         return res;
@@ -31,7 +31,7 @@ struct http_file_ctx{
             {256},
             {file, size}
         };
-        msg.refresh_content_length(size);
+        msg.set_content_length(size);
         auto it = msg.format_to(static_cast<char*>(res.header.iov_base));
         res.header.iov_len = seele::meta::safe_cast<size_t>(it - static_cast<char*>(res.header.iov_base));
         return res;

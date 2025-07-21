@@ -110,12 +110,11 @@ expected_hdl_ret handle_file_get(const http::req_msg& req) {
         }
         return http_file_ctx::make(
             {
-                {200, "OK"},
+                200,
                 {
                     {"Content-Type", content_type},
                     {"X-Content-Type-Options", "nosniff"},
-                },
-                std::nullopt
+                }
             }, 
             ctx.value().iov_base, 
             ctx.value().iov_len
@@ -169,12 +168,11 @@ struct send_http_error {
         auto content = http::error_contents[code];
         this->ctx = http_file_ctx::make(
             {
-                {static_cast<size_t>(code), "ERROR"},
+                static_cast<size_t>(code),
                 {
                     {"Content-Type", "text/html; charset=utf-8"},
                     {"X-Content-Type-Options", "nosniff"},
-                },
-                std::nullopt
+                }
             },
             (void*) content.data(),
             content.size()
@@ -194,41 +192,32 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
     co_await coro::thread::dispatch_awaiter{};
 
     char read_buffer[8192];
-    std::optional<std::string_view> remain = std::nullopt;
+    std::string_view buffer_view;
     auto timeout = 500ms;
     while (true) {
-        auto parser = http::req_msg::parser();
-        if (remain.has_value()) {
-            parser.send_and_resume(remain.value());
-            remain = std::nullopt;
+        http::req_msg msg{};
+        auto parser = msg.parser();
+
+        if (!buffer_view.empty()) {
+            parser.send_and_resume(buffer_view);
         }
         while (!parser.done()) {
             std::optional<int32_t> res = co_await coro_io::awaiter::link_timeout{
                 coro_io::awaiter::read{fd_w, read_buffer, sizeof(read_buffer)},
                 timeout
             };
-            
-            if (!res.has_value()) {
-                log::async().warn("Read timed out for {}", client_addr.toString());
-                co_return;
-            }
 
-            auto bytes_read = res.value();
-            if (bytes_read == 0) {
-                log::async().warn("Connection closed by client {}", client_addr.toString());
+            if (auto bytes_read = res.value_or(-1); bytes_read < 0) {
+                log::async().error("Failed to read from {}: {}", client_addr.toString(), bytes_read);
                 co_return;
+            } else {
+                parser.send_and_resume({read_buffer, static_cast<size_t>(bytes_read)});
             }
-            if (bytes_read < 0) {
-                log::async().error("Failed to read from socket: {}", strerror(-bytes_read));
-                co_return;
-            }
-
-            parser.send_and_resume({read_buffer, static_cast<size_t>(bytes_read)});
         }
 
-        if (auto result = parser.get()) {
-            auto& [msg, remain_opt] = result.value();
-            remain = remain_opt;
+        if (auto result = parser.get(); result.has_value()) {
+
+            buffer_view = result.value();
 
             if (auto it = msg.header.find("Connection"); it != msg.header.end()) {
                 if (it->second == "close") {

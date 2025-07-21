@@ -7,13 +7,13 @@
 
 namespace seele::coro{
     template <typename return_t, typename message_t>
-    class co_task{
+    class sendable_task{
     public:
         struct promise_type{
             return_t return_v;
             message_t* yield_v;
             auto get_return_object(){
-                return co_task{this};
+                return sendable_task{this};
             }
 
             auto initial_suspend(){
@@ -47,13 +47,13 @@ namespace seele::coro{
 
     public:
 
-        explicit co_task(promise_type* p): handle{handle_type::from_promise(*p)}{}
-        co_task(co_task&& other) = delete;
-        co_task(const co_task& other) = delete;
-        co_task& operator=(co_task&& other) = delete;
-        co_task& operator=(const co_task& other) = delete;
+        explicit sendable_task(promise_type* p): handle{handle_type::from_promise(*p)}{}
+        sendable_task(sendable_task&& other) = delete;
+        sendable_task(const sendable_task& other) = delete;
+        sendable_task& operator=(sendable_task&& other) = delete;
+        sendable_task& operator=(const sendable_task& other) = delete;
 
-        ~co_task(){
+        ~sendable_task(){
             handle.destroy();
         }
 

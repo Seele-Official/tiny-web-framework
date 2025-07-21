@@ -4,11 +4,12 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 #include "meta.h"
-#include "coro/co_task.h"
+#include "coro/sendable_task.h"
 #include "coro/task.h"
 
 
@@ -28,9 +29,9 @@ namespace http {
         TRACE
     };     
     using header_t = std::unordered_map<std::string, std::string>;
-    using query_t = std::optional<std::string>;
+    using query_t = std::string;
+    using body_t = std::string;
 
-    using body_t = std::optional<std::string>;
     struct origin_form{
         std::string path;
         query_t query;
@@ -44,66 +45,46 @@ namespace http {
     >;
 
     struct req_line {
-
         method_t method;
         request_target_t target;
         std::string version;
-        
-        template<typename out_t>
-        auto format_to(out_t&& out) const {
-            return std::format_to(std::forward<out_t>(out), "{} {} {}\r\n", 
-                meta::enum_to_string(method), target, version);
-        }
-
     };
     
-    struct parse_ret;
 
+    
     struct req_msg {
         req_line line;
         header_t header;
         body_t body;
 
-
-        static coro::co_task<std::optional<parse_ret>, std::string_view> parser();
+        coro::sendable_task<std::optional<std::string_view>, std::string_view> parser();
     };
 
-    struct parse_ret{
-        req_msg msg;
-        std::optional<std::string_view> remain; 
-    };
 
 
     struct stat_line{
         size_t status_code;
-        std::string version;
-        std::string reason_phrase;
-        stat_line(size_t status_code, std::string reason_phrase) :
-            status_code(status_code),
-            version("HTTP/1.1"),
-            reason_phrase(std::move(reason_phrase)) {}
         template<typename out_t>
         auto format_to(out_t&& out) const {
-            return std::format_to(std::forward<out_t>(out), "{} {} {}\r\n", version, status_code, reason_phrase);
+            return std::format_to(std::forward<out_t>(out), "HTTP/1.1 {} UNIM\r\n", status_code);
         }
         std::string to_string() const {
-            return std::format("{} {} {}\r\n", version, status_code, reason_phrase);
+            return std::format("HTTP/1.1 {} UNIM\r\n", status_code);
         }
     };
 
-    struct res_msg {
-        stat_line stat_l;
-        header_t header;
-        body_t body;
-
-        void refresh_content_length() {
-            if (body.has_value()) {
-                header.insert_or_assign("Content-Length", std::to_string(body->size()));
-            } else {
-                header.erase("Content-Length");
+    class res_msg {
+    public:
+        res_msg() = default;
+        res_msg(size_t status_code, header_t header, body_t body = "") : 
+        stat_l(status_code), header(std::move(header)), body(std::move(body)) {
+            if (this->body.empty()) {
+                header.emplace("Content-Length", std::to_string(body.size()));
             }
+
         }
-        void refresh_content_length(size_t size) {
+        ~res_msg() = default;
+        void set_content_length(size_t size) {
             header.insert_or_assign("Content-Length", std::to_string(size));
         }
 
@@ -113,26 +94,25 @@ namespace http {
             for (const auto& [key, value] : header) {
                 it = std::format_to(it, "{}: {}\r\n", key, value);
             }
-            it = std::format_to(it, "\r\n");
-            if (body) {
-                it = std::format_to(it, "{}", *body);
-            }
+            it = std::format_to(it, "\r\n{}", body);
             return it;
         }
 
         std::string to_string() const {
             std::string res;
-            res.reserve(256 + body.value_or("").size());
+            res.reserve(256 + body.size());
             res.append(stat_l.to_string());
             for (const auto& [key, value] : header) {
                 res.append(std::format("{}: {}\r\n", key, value));
             }
             res.append("\r\n");
-            if (body) {
-                res.append(*body);
-            }
+            res.append(body);
             return res;
         }
+    private:
+        stat_line stat_l;
+        header_t header;
+        body_t body;
     };
 
 

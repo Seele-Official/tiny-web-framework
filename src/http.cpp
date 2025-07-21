@@ -8,7 +8,6 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
-#include "coro/co_task.h"
 #include "meta.h"
 #include "math.h"
 #include "basic.h"
@@ -138,7 +137,7 @@ namespace http {
                 }
                 return origin_form{
                     path.value(),
-                    std::nullopt // No query
+                    query_t{}
                 };
             }
             auto path = parse_absolute_path(str.substr(0, pos));
@@ -170,8 +169,7 @@ namespace http {
         return str.substr(start, end - start);
     }
 
-    coro::co_task<std::optional<parse_ret>, std::string_view> req_msg::parser() {
-        req_msg message;
+    coro::sendable_task<std::optional<std::string_view>, std::string_view> req_msg::parser() {
 
         std::string_view data;
         co_wait_message data;
@@ -215,7 +213,7 @@ namespace http {
 
 
         if (auto req_target = parse_request_target(req_line_parts[1]); req_target.has_value()) {
-            message.line = {
+            this->line = {
                 *method_opt,
                 std::move(req_target.value()),
                 std::string(req_line_parts[2])
@@ -251,13 +249,13 @@ namespace http {
                 co_return std::nullopt; // Invalid header format
             }
 
-            message.header.emplace(trim_string_view(key), trim_string_view(value));
+            this->header.emplace(trim_string_view(key), trim_string_view(value));
             line_buffer.clear();
         }
 
         // Parse body if Content-Length is present
         std::string body_buffer;
-        if(auto content_length_it = message.header.find("Content-Length"); content_length_it != message.header.end()) {
+        if(auto content_length_it = this->header.find("Content-Length"); content_length_it != this->header.end()) {
             if (auto res = math::stoi(content_length_it->second); res.has_value()){
                 size_t content_length = res.value();
                 if (content_length > 0) {
@@ -271,22 +269,14 @@ namespace http {
                             data.remove_prefix(need_to_read);
                         }
                     }
-                    message.body = std::move(body_buffer);
-                } else {
-                    message.body = std::nullopt; // No body
+                    this->body = std::move(body_buffer);
                 }
             } else {
                 co_return std::nullopt; // Invalid Content-Length value
             }
-        } else {
-            message.body = std::nullopt;
         }
 
-        co_return parse_ret{
-            std::move(message),
-            data.empty() ? std::nullopt : std::make_optional(data)
-        };
-
+        co_return data;
     }
 
 
