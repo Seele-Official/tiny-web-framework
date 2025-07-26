@@ -278,11 +278,22 @@ namespace http {
 
         co_return data;
     }
+    phrase_content_map phrase_contents = {
+        {status_code::ok, "OK"},
 
+        {status_code::bad_request, "Bad Request"},
+        {status_code::forbidden, "Forbidden"},
+        {status_code::not_found, "Not Found"},
+        {status_code::method_not_allowed, "Method Not Allowed"},
+
+
+        {status_code::internal_server_error, "Internal Server Error"},
+        {status_code::not_implemented, "Not Implemented"},
+    };
 
     error_content_map error_contents = {
         {
-            error_code::bad_request,
+            status_code::bad_request,
             "<!DOCTYPE html>\n"
             "<html>\n"
             "<head>\n"
@@ -310,7 +321,7 @@ namespace http {
             "</html>"
         },
         {
-            error_code::forbidden,
+            status_code::forbidden,
             "<!DOCTYPE html>\n"
             "<html>\n"
             "<head>\n"
@@ -337,7 +348,7 @@ namespace http {
             "</html>"    
         },
         {
-            error_code::not_found,
+            status_code::not_found,
             "<!DOCTYPE html>\n"
             "<html>\n"
             "<head>\n"
@@ -363,7 +374,7 @@ namespace http {
             "</html>"
         },
         {
-            error_code::method_not_allowed,
+            status_code::method_not_allowed,
             "<!DOCTYPE html>\n"
             "<html>\n"
             "<head>\n"
@@ -385,7 +396,7 @@ namespace http {
             "</html>"
         },
         {
-            error_code::internal_server_error,
+            status_code::internal_server_error,
             "HTTP/1.1 500 Internal Server Error\r\n"
             "Content-Type: text/html; charset=utf-8\r\n"
             "X-Content-Type-Options: nosniff\r\n"
@@ -436,7 +447,7 @@ namespace http {
             "</html>"   
         },
         {
-            error_code::not_implemented,
+            status_code::not_implemented,
             "<!DOCTYPE html>\n"
             "<html>\n"
             "<head>\n"

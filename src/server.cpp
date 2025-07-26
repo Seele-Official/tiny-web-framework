@@ -35,6 +35,8 @@ using std::literals::operator""ms;
 
 using namespace seele;
 
+namespace web {
+
 namespace env {
     static std::filesystem::path root_path = std::filesystem::current_path() / "www";
     static net::ipv4 addr;
@@ -42,7 +44,7 @@ namespace env {
 
     static std::unordered_map<std::string, mmap_wrapper> file_caches{};
 
-    std::expected<iovec, http::error_code> get_file_cache(const std::filesystem::path& path) {
+    std::expected<iovec, http::status_code> get_file_cache(const std::filesystem::path& path) {
         auto full_path = std::filesystem::absolute(path);
         if (auto it = file_caches.find(path.string());it != file_caches.end()) {
             return iovec{
@@ -50,7 +52,7 @@ namespace env {
                 it->second.size
             };
         }
-        return std::unexpected{http::error_code::not_found};
+        return std::unexpected{http::status_code::not_found};
     }
 
 
@@ -89,11 +91,11 @@ struct wait_promise_init{
 };
 
 
-send_task send_http_error(http::error_code code){
+send_task send_http_error(http::status_code code){
     auto content = http::error_contents[code];
     http_file_ctx ctx = http_file_ctx::make(
         {
-            static_cast<size_t>(code),
+            code,
             {
                 {"Content-Type", "text/html; charset=utf-8"},
                 {"X-Content-Type-Options", "nosniff"},
@@ -206,7 +208,7 @@ send_task send_msg(const http::res_msg& msg){
 handler_response handle_file_get(const http::req_msg& req){
     auto origin = std::get_if<http::origin_form>(&req.line.target);
     if (!origin) {
-        return send_http_error(http::error_code::not_implemented);
+        return send_http_error(http::status_code::not_implemented);
     }
 
     std::filesystem::path origin_path = origin->path;
@@ -216,7 +218,7 @@ handler_response handle_file_get(const http::req_msg& req){
 
     if (rel.empty() || *rel.begin() == ".."){
         log::async().error("Attempted to access outside of root path: {}", full_path.string());
-        return send_http_error(http::error_code::forbidden);
+        return send_http_error(http::status_code::forbidden);
     }
 
     if (std::filesystem::is_directory(full_path)) {
@@ -237,7 +239,7 @@ handler_response handle_file_get(const http::req_msg& req){
         return send_file(
             http_file_ctx::make(
                 {
-                    200,
+                    http::status_code::ok,
                     {
                         {"Content-Type", content_type},
                         {"X-Content-Type-Options", "nosniff"},
@@ -263,10 +265,10 @@ handler_response handle_req(const http::req_msg& req){
                     return handle_file_get(req);
                 }
             }
-            return send_http_error(http::error_code::not_implemented);
+            return send_http_error(http::status_code::not_implemented);
         }
         default:
-            return send_http_error(http::error_code::not_implemented);
+            return send_http_error(http::status_code::not_implemented);
     
     }
 }
@@ -324,7 +326,7 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
 
         } else {
             log::async().error("Failed to parse request from {}", client_addr.toString());
-            co_await send_http_error(http::error_code::bad_request).await(fd_w.get(), client_addr, timeout);
+            co_await send_http_error(http::status_code::bad_request).await(fd_w.get(), client_addr, timeout);
             co_return;
         }
 
@@ -363,12 +365,14 @@ coro::task server_loop() {
     co_return;
 }
 
+} // namespace web
+
 
 
 struct app& app::set_root_path(std::string_view path) {
-    env::root_path = std::filesystem::absolute(path);
+    web::env::root_path = std::filesystem::absolute(path);
 
-    for (const auto& entry : std::filesystem::recursive_directory_iterator(env::root_path)) {
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(web::env::root_path)) {
         if (entry.is_regular_file()) {
             auto full_path = std::filesystem::absolute(entry.path());
             log::sync().info("Adding file to cache: {}", full_path.string());
@@ -388,15 +392,15 @@ struct app& app::set_root_path(std::string_view path) {
                 std::println("File is empty: {}", full_path.string());
                 continue;
             }
-            env::file_caches.emplace(full_path.string(), mmap_wrapper(file_size, PROT_READ, MAP_SHARED, file_fd_w.get(), 0));
+            web::env::file_caches.emplace(full_path.string(), mmap_wrapper(file_size, PROT_READ, MAP_SHARED, file_fd_w.get(), 0));
         }
     }
-    if (!std::filesystem::exists(env::root_path)) {
-        std::println("Root path does not exist: {}", env::root_path.string());
+    if (!std::filesystem::exists(web::env::root_path)) {
+        std::println("Root path does not exist: {}", web::env::root_path.string());
         std::terminate();
     }
-    if (!std::filesystem::is_directory(env::root_path)) {
-        std::println("Root path is not a directory: {}", env::root_path.string());
+    if (!std::filesystem::is_directory(web::env::root_path)) {
+        std::println("Root path is not a directory: {}", web::env::root_path.string());
         std::terminate();
     }
     return *this;
@@ -405,45 +409,45 @@ struct app& app::set_root_path(std::string_view path) {
 struct app& app::set_addr(std::string_view addr_str) {
     auto parsed = net::parse_addr(addr_str);
     if (parsed.has_value()) {
-        env::addr = parsed.value();
+        web::env::addr = parsed.value();
     } else {
         std::println("Failed to parse address: {}", parsed.error());
         std::terminate();
     }
-    env::fd_w = setup_socket(env::addr, 10240);
+    web::env::fd_w = setup_socket(web::env::addr, 10240);
 
-    if (!env::fd_w.is_valid()){
+    if (!web::env::fd_w.is_valid()){
         std::println("Failed to create socket, error: {}", strerror(errno));
         std::terminate();
     }
     return *this;
 }
 
-struct app& app::GET(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&) -> handler_response) {
-    env::get_routings.emplace(std::string(path), env::GET_handler{helper_ptr, handler});
+struct app& app::GET(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&) -> web::handler_response) {
+    web::env::get_routings.emplace(std::string(path), web::env::GET_handler{helper_ptr, handler});
     return *this;
 }
 
-struct app& app::POST(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&, const http::body_t&) -> handler_response){
-    env::post_routings.emplace(std::string(path), env::POST_handler{helper_ptr, handler});
+struct app& app::POST(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&, const http::body_t&) -> web::handler_response){
+    web::env::post_routings.emplace(std::string(path), web::env::POST_handler{helper_ptr, handler});
     return *this;
 }
 
 
 void app::run(){
-    if (!env::addr.is_valid()){
+    if (!web::env::addr.is_valid()){
         std::println("Server address is not valid");
         std::terminate();
     }
-    server_loop();
+    web::server_loop();
     
     std::signal(SIGINT, [](int) {
         std::println("Received SIGINT, stopping server...");
-        close(env::fd_w.release());
-        coro_io_ctx::get_instance().request_stop();
+        close(web::env::fd_w.release());
+        coro_io::ctx::get_instance().request_stop();
         
     });
-    coro_io_ctx::get_instance().run();
+    coro_io::ctx::get_instance().run();
 }
 
 

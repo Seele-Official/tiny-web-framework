@@ -62,22 +62,66 @@ namespace http {
 
 
 
+
+
+
+    enum class status_code : size_t{
+        ok = 200,
+
+        bad_request = 400,
+        forbidden = 403,
+        not_found = 404,
+        method_not_allowed = 405,
+
+
+
+        internal_server_error = 500,
+        not_implemented = 501,
+    };
+    struct phrase_content{
+        status_code code;
+        std::string_view str;
+    };
+
+    struct phrase_content_map{
+        std::array<std::string_view, 900> map;
+
+        consteval phrase_content_map(std::initializer_list<phrase_content> init_list) {
+            for (const auto& item : init_list) {
+                map[static_cast<size_t>(item.code)] = item.str;
+            }
+        }
+
+        auto operator[](status_code code) const -> std::string_view {
+            return map[static_cast<size_t>(code)];
+        }
+    };
+    
+    extern phrase_content_map phrase_contents;
+
     struct stat_line{
-        size_t status_code;
+        status_code code;
         template<typename out_t>
         auto format_to(out_t&& out) const {
-            return std::format_to(std::forward<out_t>(out), "HTTP/1.1 {} UNIM\r\n", status_code);
+            return std::format_to(
+                std::forward<out_t>(out), 
+                "HTTP/1.1 {} {}\r\n", 
+                static_cast<size_t>(code), phrase_contents[code]
+            );
         }
         std::string to_string() const {
-            return std::format("HTTP/1.1 {} UNIM\r\n", status_code);
+            return std::format(
+                "HTTP/1.1 {} {}\r\n", 
+                static_cast<size_t>(code), phrase_contents[code]
+            );
         }
     };
 
     class res_msg {
     public:
         res_msg() = default;
-        res_msg(size_t status_code, header_t header, body_t body = "") : 
-        stat_l(status_code), header(std::move(header)), body(std::move(body)) {
+        res_msg(status_code code, header_t header, body_t body = "") : 
+        stat_l(code), header(std::move(header)), body(std::move(body)) {
             if (!this->body.empty()) {
                 this->header.emplace("Content-Length", std::to_string(this->body.size()));
             }
@@ -117,20 +161,10 @@ namespace http {
 
 
 
-    enum class error_code : size_t{
-        bad_request = 400,
-        forbidden = 403,
-        not_found = 404,
-        method_not_allowed = 405,
 
-
-
-        internal_server_error = 500,
-        not_implemented = 501,
-    };
-
+    
     struct error_content{
-        error_code code;
+        status_code code;
         std::string_view str;
     };
 
@@ -143,7 +177,7 @@ namespace http {
             }
         }
 
-        auto operator[](error_code code) const -> std::string_view {
+        auto operator[](status_code code) const -> std::string_view {
             return map[static_cast<size_t>(code)];
         }
     };

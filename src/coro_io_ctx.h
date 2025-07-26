@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <liburing.h>
 #include <cstdint>
+#include <print>
 #include <semaphore>
 #include <string_view>
 #include <thread>
@@ -15,7 +16,8 @@
 #include "structs/spsc_object_pool.h"
 constexpr size_t submit_threshold = 64;
 
-class coro_io_ctx{
+namespace coro_io {
+class ctx{
 public:      
     struct request{        
         void* helper_ptr;
@@ -35,10 +37,10 @@ public:
     };
 
 
-    coro_io_ctx(const coro_io_ctx&) = delete;
-    coro_io_ctx(coro_io_ctx&&) = delete;
-    coro_io_ctx& operator=(const coro_io_ctx&) = delete;
-    coro_io_ctx& operator=(coro_io_ctx&&) = delete;
+    ctx(const ctx&) = delete;
+    ctx(ctx&&) = delete;
+    ctx& operator=(const ctx&) = delete;
+    ctx& operator=(ctx&&) = delete;
 
     usr_data* new_usr_data(usr_data data){
         usr_data* data_ptr;
@@ -70,8 +72,8 @@ public:
 
     void clean_up();
 
-    inline static coro_io_ctx& get_instance() {
-        static coro_io_ctx instance;
+    inline static ctx& get_instance() {
+        static ctx instance;
         return instance;
     }
 private: 
@@ -80,12 +82,15 @@ private:
 
     void start_listen(std::stop_token st);
 
-    coro_io_ctx(uint32_t entries = 128, uint32_t flags = 0) : max_entries{entries}, pending_req_count{0}, unp_sem{0}, usr_data_pool{1024*128} {
-        io_uring_queue_init(entries, &ring, flags);
+    ctx(uint32_t entries = 128, uint32_t flags = 0) : max_entries{entries}, pending_req_count{0}, unp_sem{0}, usr_data_pool{1024*128} {
+        if(io_uring_queue_init(entries, &ring, flags) < 0) {
+            std::println("Failed to initialize io_uring");
+            std::terminate();
+        }
         this->worker_thread = std::jthread([&] (std::stop_token st) { worker(st); }, stop_src.get_token());
         this->is_worker_running.store(true, std::memory_order_release);
     }
-    ~coro_io_ctx();  
+    ~ctx();  
 
 
 
@@ -101,3 +106,4 @@ private:
 
     seele::structs::spsc_object_pool<usr_data> usr_data_pool;
 };
+}

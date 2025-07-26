@@ -38,7 +38,7 @@ std::optional<str_map> parse_query(const std::string& query) {
 
 class tiny_get_app{
 public:
-    handler_response operator()(const http::query_t& query, const http::header_t& header) {
+    web::handler_response operator()(const http::query_t& query, const http::header_t& header) {
         std::println("Received GET request for /tiny_app with query:");
         if (!query.empty()) {
             if (auto parsed_query = parse_query(query); parsed_query.has_value()) {
@@ -47,7 +47,7 @@ public:
                 }
             } else {
                 std::println("Invalid query format");
-                return send_http_error(http::error_code::bad_request);
+                return web::send_http_error(http::status_code::bad_request);
             }
         } else {
             std::println("No query");
@@ -58,9 +58,9 @@ public:
             std::println("  {}: {}", key, value);
         }
 
-        return send_msg(
+        return web::send_msg(
             http::res_msg{
-                200,
+                http::status_code::ok,
                 {
                     {"Content-Type", "text/plain; charset=utf-8"},
                     {"X-Content-Type-Options", "nosniff"},

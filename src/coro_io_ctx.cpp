@@ -18,9 +18,11 @@ using std::chrono::operator""ms;
 using std::chrono::operator""ns;
 
 
+namespace coro_io {
 
 
-void coro_io_ctx::worker(std::stop_token st){
+
+void ctx::worker(std::stop_token st){
 
     size_t submit_count = 0;
     while (!st.stop_requested()) {
@@ -58,7 +60,7 @@ void coro_io_ctx::worker(std::stop_token st){
 
 
 
-void coro_io_ctx::start_listen(std::stop_token st){
+void ctx::start_listen(std::stop_token st){
     sigset_t sigmask;
     sigemptyset(&sigmask); 
     sigdelset(&sigmask, SIGINT);
@@ -114,7 +116,7 @@ void coro_io_ctx::start_listen(std::stop_token st){
     }
 }
 
-void coro_io_ctx::clean_up() {
+void ctx::clean_up() {
     while (this->is_worker_running.load(std::memory_order_acquire)) {
         std::this_thread::sleep_for(100ms);
     }
@@ -188,6 +190,8 @@ void coro_io_ctx::clean_up() {
 }
 
 
-coro_io_ctx::~coro_io_ctx() {
+ctx::~ctx() {
     io_uring_queue_exit(&ring);
+}
+
 }

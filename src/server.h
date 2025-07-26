@@ -13,6 +13,7 @@
 #include "io.h"
 #include "meta.h"
 
+namespace web {
 struct http_file_ctx{
     iovec_wrapper header;
     iovec data;
@@ -136,9 +137,12 @@ struct handler_response{
     handler_response(send_task&& t): task(std::move(t)){}
 };
 
-send_task send_http_error(http::error_code code);
+send_task send_http_error(http::status_code code);
 send_task send_file(http_file_ctx&& ctx);
 send_task send_msg(const http::res_msg& msg);
+
+} // namespace web
+
 
 
 struct app{
@@ -147,29 +151,29 @@ struct app{
     app& set_addr(std::string_view addr_str);
 
     template<typename invocable_t>
-        requires std::is_invocable_r_v<handler_response, invocable_t, const http::query_t&, const http::header_t&>
+        requires std::is_invocable_r_v<web::handler_response, invocable_t, const http::query_t&, const http::header_t&>
     app& GET(std::string_view path, invocable_t& handler);
 
-    app& GET(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&) -> handler_response);
+    app& GET(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&) -> web::handler_response);
 
     template<typename invocable_t>
-        requires std::is_invocable_r_v<handler_response, invocable_t, const http::query_t&, const http::header_t&, const http::body_t&>
+        requires std::is_invocable_r_v<web::handler_response, invocable_t, const http::query_t&, const http::header_t&, const http::body_t&>
     app& POST(std::string_view path, invocable_t& handler);
 
-    app& POST(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&, const http::body_t&) -> handler_response);
+    app& POST(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&, const http::body_t&) -> web::handler_response);
 
     void run();
 };
 
 template<typename invocable_t>
-    requires std::is_invocable_r_v<handler_response, invocable_t, const http::query_t&, const http::header_t&>
+    requires std::is_invocable_r_v<web::handler_response, invocable_t, const http::query_t&, const http::header_t&>
 app& app::GET(std::string_view path, invocable_t& handler){
     using type = std::decay_t<invocable_t>;
-    if constexpr (std::is_same_v<type, auto (*)(const http::query_t&, const http::header_t&) -> handler_response>) {
+    if constexpr (std::is_same_v<type, auto (*)(const http::query_t&, const http::header_t&) -> web::handler_response>) {
         return GET(path, nullptr, handler);
     } else {
-        return GET(path, &handler, [](void* helper_ptr, const http::query_t& query, const http::header_t& header) -> handler_response {
-            constexpr auto (type::*func)(const http::query_t&, const http::header_t&) -> handler_response = &type::operator();
+        return GET(path, &handler, [](void* helper_ptr, const http::query_t& query, const http::header_t& header) -> web::handler_response {
+            constexpr auto (type::*func)(const http::query_t&, const http::header_t&) -> web::handler_response = &type::operator();
 
             return (static_cast<invocable_t*>(helper_ptr)->*func)(query, header);
         });
@@ -178,14 +182,14 @@ app& app::GET(std::string_view path, invocable_t& handler){
 }
 
 template<typename invocable_t>
-    requires std::is_invocable_r_v<handler_response, invocable_t, const http::query_t&, const http::header_t&, const http::body_t&>
+    requires std::is_invocable_r_v<web::handler_response, invocable_t, const http::query_t&, const http::header_t&, const http::body_t&>
 app& app::POST(std::string_view path, invocable_t& handler){
     using type = std::decay_t<invocable_t>;
-    if constexpr (std::is_same_v<type, auto (*)(const http::query_t&, const http::header_t&, const http::body_t&) -> handler_response>) {
+    if constexpr (std::is_same_v<type, auto (*)(const http::query_t&, const http::header_t&, const http::body_t&) -> web::handler_response>) {
         return POST(path, nullptr, handler);
     } else {
-        return POST(path, &handler, [](void* helper_ptr, const http::query_t& query, const http::header_t& header, const http::body_t& body) -> handler_response {
-            constexpr auto (type::*func)(const http::query_t&, const http::header_t&, const http::body_t&) -> handler_response = &type::operator();
+        return POST(path, &handler, [](void* helper_ptr, const http::query_t& query, const http::header_t& header, const http::body_t& body) -> web::handler_response {
+            constexpr auto (type::*func)(const http::query_t&, const http::header_t&, const http::body_t&) -> web::handler_response = &type::operator();
 
             return (static_cast<invocable_t*>(helper_ptr)->*func)(query, header, body);
         });

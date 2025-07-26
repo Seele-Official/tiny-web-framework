@@ -60,7 +60,7 @@ namespace coro_io::awaiter {
         bool await_ready() { return false; }
         std::coroutine_handle<> await_suspend(std::coroutine_handle<> handle) {
             this->handle = handle;
-            if(coro_io_ctx::get_instance().submit(
+            if(ctx::get_instance().submit(
                     this, 
                     [](void* helper_ptr, io_uring* ring) {
                         return static_cast<decltype(this)>(helper_ptr)->init(ring);
@@ -85,8 +85,8 @@ namespace coro_io::awaiter {
             auto* sqe = io_uring_get_sqe(ring);
             static_cast<derived*>(this)->setup(sqe);
             sqe->user_data = std::bit_cast<std::uintptr_t>(
-                coro_io_ctx::get_instance().new_usr_data(
-                    coro_io_ctx::io_usr_data{
+                ctx::get_instance().new_usr_data(
+                    ctx::io_usr_data{
                         this->handle,
                         &this->io_ret
                     }
@@ -185,7 +185,7 @@ namespace coro_io::awaiter {
         bool await_ready() { return false; }
         std::coroutine_handle<> await_suspend(std::coroutine_handle<> handle) {
             this->awaiter.handle = handle;
-            if(coro_io_ctx::get_instance().submit(
+            if(ctx::get_instance().submit(
                     this, 
                     [](void* helper_ptr, io_uring* ring) {
                         return static_cast<decltype(this)>(helper_ptr)->init(ring);
@@ -203,8 +203,8 @@ namespace coro_io::awaiter {
             auto* timeout_sqe = io_uring_get_sqe(ring);
             // Need to handle validation of sqe, but we assume the it's valid
             this->awaiter.setup(sqe);
-            auto io_data = coro_io_ctx::get_instance().new_usr_data(
-                coro_io_ctx::io_usr_data{
+            auto io_data = ctx::get_instance().new_usr_data(
+                ctx::io_usr_data{
                     this->awaiter.handle,
                     &this->awaiter.io_ret
                 }
@@ -217,8 +217,8 @@ namespace coro_io::awaiter {
             io_uring_prep_link_timeout(timeout_sqe, &this->ts, 0);
 
             timeout_sqe->user_data = std::bit_cast<std::uintptr_t>(
-                coro_io_ctx::get_instance().new_usr_data(
-                    coro_io_ctx::timeout_usr_data{
+                ctx::get_instance().new_usr_data(
+                    ctx::timeout_usr_data{
                         io_data
                     }
                 )
