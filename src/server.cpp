@@ -2,6 +2,7 @@
 
 
 #include <atomic>
+#include <coroutine>
 #include <cstdint>
 #include <cstring>
 #include <exception>
@@ -15,10 +16,12 @@
 #include <string>
 #include <cstddef>
 #include <string_view>
+#include <thread>
 #include <unistd.h>
 #include <unordered_map>
 #include <filesystem>
 #include <csignal>
+#include <utility>
 
 #include "coro/task.h"
 #include "io.h"
@@ -54,18 +57,18 @@ namespace env {
 
     struct GET_handler {
         void* helper_ptr;
-        auto (*handler)(void*, const http::query_t&, const http::header_t&) -> expected_hdl_ret;
+        auto (*handler)(void*, const http::query_t&, const http::header_t&) -> handler_response;
 
-        inline expected_hdl_ret operator()(const http::query_t& query, const http::header_t& header) {
+        inline handler_response operator()(const http::query_t& query, const http::header_t& header) {
             return handler(helper_ptr, query, header);
         }
     };
 
     struct POST_handler {
         void* helper_ptr;
-        auto (*handler)(void*, const http::query_t&, const http::header_t&, const http::body_t&) -> expected_hdl_ret;
+        auto (*handler)(void*, const http::query_t&, const http::header_t&, const http::body_t&) -> handler_response;
 
-        inline expected_hdl_ret operator()(const http::query_t& query, const http::header_t& header, const http::body_t& body) {
+        inline handler_response operator()(const http::query_t& query, const http::header_t& header, const http::body_t& body) {
             return handler(helper_ptr, query, header, body);
         }
     };
@@ -75,13 +78,135 @@ namespace env {
     static std::unordered_map<std::string, POST_handler> post_routings;
 }
 
+struct wait_promise_init{
+    send_task::promise_type* promise;
+    auto await_ready() { return false;}
+    
+    void await_suspend(std::coroutine_handle<send_task::promise_type> handle) {
+        this->promise = &handle.promise();
+    }
+    auto await_resume() {return promise;}
+};
 
 
-expected_hdl_ret handle_file_get(const http::req_msg& req) {
+send_task send_http_error(http::error_code code){
+    auto content = http::error_contents[code];
+    http_file_ctx ctx = http_file_ctx::make(
+        {
+            static_cast<size_t>(code),
+            {
+                {"Content-Type", "text/html; charset=utf-8"},
+                {"X-Content-Type-Options", "nosniff"},
+            }
+        },
+        (void*) content.data(),
+        content.size()
+    );
+    auto promise = co_await wait_promise_init{};
+    auto fd = promise->fd;
+    co_await coro_io::awaiter::link_timeout{
+        coro_io::awaiter::writev{fd, &ctx.header, 2},
+        200ms
+    };
 
+    co_return -1;
+}
+
+send_task send_file(http_file_ctx&& ctx){
+    auto file_ctx = std::move(ctx);
+
+    auto promise = co_await wait_promise_init{};
+
+    auto fd = promise->fd;
+    auto client_addr = promise->client_addr;
+    auto timeout = promise->timeout;
+
+
+
+    uint32_t total_size = file_ctx.size();
+    uint32_t sent_size = 0;
+    int32_t res = co_await coro_io::awaiter::link_timeout{
+        coro_io::awaiter::writev{
+            fd,
+            &file_ctx.header,
+            2
+        },
+        timeout
+    };
+
+    if (res <= 0) {
+        log::async().error(
+            "Failed to send response header for {} : {}", 
+            client_addr.toString(), coro_io::error::msg
+        );
+        co_return -1;
+    }
+    sent_size += res;
+
+    while (sent_size < total_size) {
+        auto offset = file_ctx.offset_of(sent_size);
+        res = co_await coro_io::awaiter::link_timeout{
+            coro_io::awaiter::writev{
+                fd,
+                &offset,
+                1
+            },
+            timeout
+        };
+        if (res <= 0) {
+            log::async().error(
+                "Failed to send response header for {} : {}", 
+                client_addr.toString(), coro_io::error::msg
+            );
+            co_return -1;
+        }
+        sent_size += res;
+    }
+    co_return sent_size;
+}
+
+send_task send_msg(const http::res_msg& msg){
+    
+    std::string str = msg.to_string();
+
+    auto promise = co_await wait_promise_init{};
+
+    auto fd = promise->fd;
+    auto client_addr = promise->client_addr;
+    auto timeout = promise->timeout;
+
+    
+    uint32_t total_size = static_cast<uint32_t>(str.size());
+    uint32_t sent_size = 0;
+    while (sent_size < total_size) {
+        auto offset = str.data() + sent_size;
+        auto remaining_size = total_size - sent_size;
+        int32_t res = co_await coro_io::awaiter::link_timeout{
+            coro_io::awaiter::write{
+                fd,
+                offset,
+                remaining_size
+            },
+            timeout
+        };
+        if (res <= 0) {
+            log::async().error(
+                "Failed to send response header for {} : {}", 
+                client_addr.toString(), coro_io::error::msg
+            );
+            co_return -1;
+        }
+        sent_size += res;
+    }
+    co_return sent_size;
+}
+
+
+
+handler_response handle_file_get(const http::req_msg& req){
     auto origin = std::get_if<http::origin_form>(&req.line.target);
     if (!origin) {
-        return std::unexpected{http::error_code::not_implemented};
+        return send_http_error(http::error_code::not_implemented);
     }
 
     std::filesystem::path origin_path = origin->path;
@@ -91,7 +216,7 @@ expected_hdl_ret handle_file_get(const http::req_msg& req) {
 
     if (rel.empty() || *rel.begin() == ".."){
         log::async().error("Attempted to access outside of root path: {}", full_path.string());
-        return std::unexpected{http::error_code::forbidden};
+        return send_http_error(http::error_code::forbidden);
     }
 
     if (std::filesystem::is_directory(full_path)) {
@@ -99,7 +224,7 @@ expected_hdl_ret handle_file_get(const http::req_msg& req) {
     }
 
     if(auto ctx = env::get_file_cache(full_path);!ctx.has_value()){
-        return std::unexpected{ctx.error()};
+        return send_http_error(ctx.error());
     } else {
 
         std::string content_type = "application/octet-stream";
@@ -108,81 +233,45 @@ expected_hdl_ret handle_file_get(const http::req_msg& req) {
         if (auto it = http::mime_types.find(ext);it != http::mime_types.end()) {
             content_type = it->second;
         }
-        return http_file_ctx::make(
-            {
-                200,
+
+        return send_file(
+            http_file_ctx::make(
                 {
-                    {"Content-Type", content_type},
-                    {"X-Content-Type-Options", "nosniff"},
-                }
-            }, 
-            ctx.value().iov_base, 
-            ctx.value().iov_len
+                    200,
+                    {
+                        {"Content-Type", content_type},
+                        {"X-Content-Type-Options", "nosniff"},
+                    }
+                }, 
+                ctx.value().iov_base, 
+                ctx.value().iov_len
+            )
         );
     }
-}
+
+};
 
 
 
-expected_hdl_ret handle_req(const http::req_msg& req){
+handler_response handle_req(const http::req_msg& req){
     switch (req.line.method) {
         case http::method_t::GET: {
-            auto origin = std::get_if<http::origin_form>(&req.line.target);            
-            if (origin) {            
-                if (auto it = env::get_routings.find(origin->path); it != env::get_routings.end()) {
+            if (auto origin = std::get_if<http::origin_form>(&req.line.target)) {
+                if(auto it = env::get_routings.find(origin->path); it != env::get_routings.end()) {
                     return it->second(origin->query, req.header);
+                } else {
+                    return handle_file_get(req);
                 }
-                return handle_file_get(req);
             }
-            return std::unexpected{http::error_code::not_implemented};
+            return send_http_error(http::error_code::not_implemented);
         }
-        break;
-        case http::method_t::POST: {
-            auto origin = std::get_if<http::origin_form>(&req.line.target);
-            if (origin) {
-                if (auto it = env::post_routings.find(origin->path); it != env::post_routings.end()) {
-                    return it->second(origin->query, req.header, req.body);
-                }
-                return std::unexpected{http::error_code::not_found};
-            }
-            return std::unexpected{http::error_code::not_implemented};
-        }
-        default:{
-                return std::unexpected{http::error_code::not_implemented};
-        }
+        default:
+            return send_http_error(http::error_code::not_implemented);
+    
     }
 }
 
 
-
-struct send_http_error {
-    http_file_ctx ctx;
-    coro_io::awaiter::link_timeout<coro_io::awaiter::writev> awaiter;
-
-    auto await_ready() { return awaiter.await_ready(); }
-    auto await_suspend(std::coroutine_handle<> handle) {
-        return awaiter.await_suspend(handle);
-    }
-    auto await_resume() {return awaiter.await_resume();}
-    send_http_error(int fd, http::error_code code){
-        auto content = http::error_contents[code];
-        this->ctx = http_file_ctx::make(
-            {
-                static_cast<size_t>(code),
-                {
-                    {"Content-Type", "text/html; charset=utf-8"},
-                    {"X-Content-Type-Options", "nosniff"},
-                }
-            },
-            (void*) content.data(),
-            content.size()
-        );
-        this->awaiter = coro_io::awaiter::link_timeout{
-            coro_io::awaiter::writev{fd, &ctx.header, 2},
-            200ms
-        };
-    }
-};
 
 
 coro::task async_handle_connection(int fd, net::ipv4 addr) {
@@ -202,13 +291,15 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
             parser.send_and_resume(buffer_view);
         }
         while (!parser.done()) {
-            std::optional<int32_t> res = co_await coro_io::awaiter::link_timeout{
-                coro_io::awaiter::read{fd_w, read_buffer, sizeof(read_buffer)},
+            int32_t res = co_await coro_io::awaiter::link_timeout{
+                coro_io::awaiter::read{fd_w.get(), read_buffer, sizeof(read_buffer)},
                 timeout
             };
 
-            if (auto bytes_read = res.value_or(-1); bytes_read < 0) {
-                log::async().error("Failed to read from {}: {}", client_addr.toString(), bytes_read);
+            if (auto bytes_read = res; bytes_read <= 0) {
+                log::async().error("Failed to read from {}: {}", 
+                    client_addr.toString(), coro_io::error::msg
+                );
                 co_return;
             } else {
                 parser.send_and_resume({read_buffer, static_cast<size_t>(bytes_read)});
@@ -227,84 +318,14 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
                 }
             }
 
-
-            if (auto handle_res = handle_req(msg); handle_res.has_value()) {
-                if (auto file_ctx = std::get_if<http_file_ctx>(&handle_res.value()); file_ctx) {
-
-                    uint32_t total_size = file_ctx->size();
-                    uint32_t sent_size = 0;
-                    std::optional<int32_t> res = co_await coro_io::awaiter::link_timeout{
-                        coro_io::awaiter::writev{
-                            fd_w,
-                            &file_ctx->header,
-                            2
-                        },
-                        timeout
-                    };
-
-                    if (!res.has_value() || res.value() <= 0) {
-                        log::async().error("Failed to send response header for {} : {}", 
-                                           client_addr.toString(), 
-                                           res.has_value() ? strerror(-res.value()) : "timeout");
-                        co_return;
-                    }
-                    sent_size += res.value();
-
-                    while (sent_size < total_size) {
-                        auto offset = file_ctx->offset_of(sent_size);
-                        res = co_await coro_io::awaiter::link_timeout{
-                            coro_io::awaiter::writev{
-                                fd_w,
-                                &offset,
-                                1
-                            },
-                            timeout
-                        };
-                        if (!res.has_value() || res.value() <= 0) {
-                            log::async().error("Failed to send file data for {} : {}", 
-                                               client_addr.toString(), 
-                                               res.has_value() ? strerror(-res.value()) : "timeout");
-                            co_return;
-                        }
-                        sent_size += res.value();
-                    }
-                } else if (auto msg_res = std::get_if<http::res_msg>(&handle_res.value()); msg_res) {
-                    std::string str = msg_res->to_string();
-                    uint32_t total_size = static_cast<uint32_t>(str.size());
-                    uint32_t sent_size = 0;
-                    while (sent_size < total_size) {
-                        auto offset = str.data() + sent_size;
-                        auto remaining_size = total_size - sent_size;
-                        std::optional<int32_t> res = co_await coro_io::awaiter::link_timeout{
-                            coro_io::awaiter::write{
-                                fd_w,
-                                offset,
-                                remaining_size
-                            },
-                            timeout
-                        };
-
-                        if (!res.has_value() || res.value() <= 0) {
-                            log::async().error("Failed to send response header for {} : {}", 
-                                            client_addr.toString(), 
-                                            res.has_value() ? strerror(-res.value()) : "timeout");
-                            co_return;
-                        }
-                        sent_size += res.value();
-                    }
-
-                } else {
-                    log::async().error("Unexpected response type");
-                    co_return;
-                }
-            } else {
-                co_await send_http_error{fd_w, handle_res.error()};
+            if (co_await handle_req(msg).await(fd_w.get(), client_addr, timeout) < 0) {
+                co_return;
             }
 
         } else {
             log::async().error("Failed to parse request from {}", client_addr.toString());
-            co_await send_http_error{fd_w, http::error_code::bad_request};
-            co_return;            
+            co_await send_http_error(http::error_code::bad_request).await(fd_w.get(), client_addr, timeout);
+            co_return;
         }
 
     }
@@ -319,26 +340,28 @@ coro::task server_loop() {
         sockaddr_in client_addr;
         socklen_t client_addr_len = sizeof(client_addr);
 
-        std::optional<int32_t> res = co_await coro_io::awaiter::link_timeout{
-            coro_io::awaiter::accept{env::fd_w, (sockaddr *)&client_addr, &client_addr_len},
+        int32_t res = co_await coro_io::awaiter::link_timeout{
+            coro_io::awaiter::accept{env::fd_w.get(), (sockaddr *)&client_addr, &client_addr_len},
             5s
         };
-        if (!res.has_value()){
-            continue;
+        switch (res) {
+            case coro_io::error::SYS:
+            case coro_io::error::CTX_CLOSED:
+                log::async().error("Failed to accept connection: {}", coro_io::error::msg);
+                co_return;
+            case coro_io::error::TIMEOUT:
+                log::async().debug("Accept timed out, retrying...");
+                continue;
+            default:
+                break;
+        
         }
         
-        if (res.value() < 0) {
-            log::async().error("Accept failed: {}", strerror(-res.value()));
-            break;
-        }
-        async_handle_connection(res.value(), net::ipv4::from_sockaddr_in(client_addr));
+        async_handle_connection(res, net::ipv4::from_sockaddr_in(client_addr));
     }
 
     co_return;
 }
-
-
-
 
 
 
@@ -365,7 +388,7 @@ struct app& app::set_root_path(std::string_view path) {
                 std::println("File is empty: {}", full_path.string());
                 continue;
             }
-            env::file_caches.emplace(full_path.string(), mmap_wrapper(file_size, PROT_READ, MAP_SHARED, file_fd_w, 0));
+            env::file_caches.emplace(full_path.string(), mmap_wrapper(file_size, PROT_READ, MAP_SHARED, file_fd_w.get(), 0));
         }
     }
     if (!std::filesystem::exists(env::root_path)) {
@@ -396,12 +419,12 @@ struct app& app::set_addr(std::string_view addr_str) {
     return *this;
 }
 
-struct app& app::GET(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&) -> expected_hdl_ret) {
+struct app& app::GET(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&) -> handler_response) {
     env::get_routings.emplace(std::string(path), env::GET_handler{helper_ptr, handler});
     return *this;
 }
 
-struct app& app::POST(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&, const http::body_t&) -> expected_hdl_ret){
+struct app& app::POST(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&, const http::body_t&) -> handler_response){
     env::post_routings.emplace(std::string(path), env::POST_handler{helper_ptr, handler});
     return *this;
 }
@@ -413,9 +436,12 @@ void app::run(){
         std::terminate();
     }
     server_loop();
+    
     std::signal(SIGINT, [](int) {
         std::println("Received SIGINT, stopping server...");
+        close(env::fd_w.release());
         coro_io_ctx::get_instance().request_stop();
+        
     });
     coro_io_ctx::get_instance().run();
 }

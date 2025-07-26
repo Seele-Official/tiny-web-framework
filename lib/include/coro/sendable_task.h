@@ -39,13 +39,6 @@ namespace seele::coro{
                 return std::suspend_always{};
             }
         };
-    private:
-        using handle_type = std::coroutine_handle<promise_type>;
-
-        handle_type handle;
-
-
-    public:
 
         explicit sendable_task(promise_type* p): handle{handle_type::from_promise(*p)}{}
         sendable_task(sendable_task&& other) = delete;
@@ -82,7 +75,9 @@ namespace seele::coro{
             }
             return std::move(handle.promise().return_v);
         }
-
+    private:
+        using handle_type = std::coroutine_handle<promise_type>;
+        handle_type handle;
     };
 }
 

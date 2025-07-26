@@ -38,7 +38,7 @@ std::optional<str_map> parse_query(const std::string& query) {
 
 class tiny_get_app{
 public:
-    expected_hdl_ret operator()(const http::query_t& query, const http::header_t& header) {
+    handler_response operator()(const http::query_t& query, const http::header_t& header) {
         std::println("Received GET request for /tiny_app with query:");
         if (!query.empty()) {
             if (auto parsed_query = parse_query(query); parsed_query.has_value()) {
@@ -47,7 +47,7 @@ public:
                 }
             } else {
                 std::println("Invalid query format");
-                return std::unexpected(http::error_code::bad_request);
+                return send_http_error(http::error_code::bad_request);
             }
         } else {
             std::println("No query");
@@ -58,59 +58,22 @@ public:
             std::println("  {}: {}", key, value);
         }
 
-        
-        return http_file_ctx::make(
-            {
+        return send_msg(
+            http::res_msg{
                 200,
                 {
-                    {"Content-Type", "application/json"},
-                }
-            },
-            f.data,
-            f.size
-        );
-    };
-    mmap_wrapper f;
-
-    tiny_get_app(int fd, size_t size): f(size, PROT_READ, MAP_SHARED, fd) {}
-};
-
-class tiny_post_app{
-public:
-    expected_hdl_ret operator()(const http::query_t& query, const http::header_t& header, const http::body_t& body) {
-        std::println("Received POST request for /tiny_app with query:");
-        if (!query.empty()) {
-            if (auto parsed_query = parse_query(query); parsed_query.has_value()) {
-                for (const auto& [key, value] : parsed_query.value()) {
-                    std::println("  {}: {}", key, value);
-                }
-            } else {
-                std::println("Invalid query format");
-                return std::unexpected(http::error_code::bad_request);
+                    {"Content-Type", "text/plain; charset=utf-8"},
+                    {"X-Content-Type-Options", "nosniff"},
+                },
+                "Hello from tiny_get_app!"
             }
-        } else {
-            std::println("No query");
-        }
+        );
+        
+    };
 
-        std::println("Headers:");
-        for (const auto& [key, value] : header) {
-            std::println("  {}: {}", key, value);
-        }
-        if (!body.empty()) {
-            std::println("Body: {}", body);
-        } else {
-            std::println("No body");
-        }
-        return http::res_msg{
-            200,
-            {
-                {"Content-Type", "application/json"},
-                {"X-Content-Type-Options", "nosniff"},
-            },
-            "{\"message\": \"POST request received\"}"
-        };
-    }
+    tiny_get_app(){}
 };
+
 
 
 int main(int argc, char* argv[]) {
@@ -138,16 +101,10 @@ int main(int argc, char* argv[]) {
             );
         }
     }
-    fd_wrapper file_fd = open("response.json", O_RDONLY);
-    if (!file_fd.is_valid()) {
-        std::println("Failed to open response.json");
-        return 0;
-    }
-    size_t file_size = get_file_size(file_fd);
-    tiny_get_app tiny_app(file_fd, file_size);
-    tiny_post_app tiny_post_app;
-    app().GET("/tiny_app.so", tiny_app);
-    app().POST("/tiny_app.so", tiny_post_app);
+    tiny_get_app tiny_app;
+    
+    app().GET("/tiny_app", tiny_app);
+
     app().run();
     return 0;
 }

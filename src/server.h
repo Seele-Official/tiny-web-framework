@@ -51,9 +51,95 @@ struct http_file_ctx{
 
 };
 
-using hdl_ret = std::variant<http::res_msg, http_file_ctx>;
+struct send_task{
+public:
+    struct promise_type{
+        send_task get_return_object(){
+            return this;
+        }
 
-using expected_hdl_ret = std::expected<hdl_ret, http::error_code>;
+        auto initial_suspend(){
+            return std::suspend_never{};
+        }
+
+        struct final_awaiter {
+            bool await_ready() noexcept { return false; }
+            void await_resume() noexcept {}
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type> h){
+                return h.promise().previous;
+            }
+        };
+        auto final_suspend() noexcept {
+            return final_awaiter{};
+        }
+        void unhandled_exception(){}
+
+        void return_value(int64_t v){
+            ret = v;
+        }
+        int32_t fd;
+        int64_t ret;
+        seele::net::ipv4 client_addr;
+        std::chrono::milliseconds timeout;
+        std::coroutine_handle<> previous;
+    };
+
+    send_task(promise_type* p): handle{handle_type::from_promise(*p)}{}
+    send_task(send_task& other) = delete;
+    send_task(send_task&& other) noexcept{
+        this->handle = std::move(other.handle);
+        other.handle = nullptr; 
+    }
+    send_task& operator=(send_task& other) = delete;
+    send_task& operator=(send_task&& other) noexcept {
+        if (this != &other) {
+            this->handle = std::move(other.handle);
+            other.handle = nullptr;
+        }
+        return *this;
+    }
+
+    ~send_task(){
+        if (this->handle){
+            this->handle.destroy();
+        }
+    }    
+    
+    struct awaiter{
+        bool await_ready() { return false; }
+        int64_t await_resume() { return std::move(this->coro.promise().ret); }
+
+        auto await_suspend(std::coroutine_handle<> h)
+        {
+            coro.promise().previous = h;
+            return coro;
+        }
+        std::coroutine_handle<promise_type> coro;
+    };
+
+    awaiter await(int fd, seele::net::ipv4 client_addr, std::chrono::milliseconds timeout){
+        this->handle.promise().fd = fd;
+        this->handle.promise().client_addr = client_addr;
+        this->handle.promise().timeout = timeout;
+        return awaiter{this->handle};
+    }
+private:
+    using handle_type = std::coroutine_handle<promise_type>;
+    handle_type handle;
+};
+
+struct handler_response{
+    send_task task;
+    auto await(int fd, seele::net::ipv4 client_addr, std::chrono::milliseconds timeout){
+        return task.await(fd, client_addr, timeout);
+    }
+    handler_response(send_task&& t): task(std::move(t)){}
+};
+
+send_task send_http_error(http::error_code code);
+send_task send_file(http_file_ctx&& ctx);
+send_task send_msg(const http::res_msg& msg);
+
 
 struct app{
     app& set_root_path(std::string_view path);
@@ -61,29 +147,29 @@ struct app{
     app& set_addr(std::string_view addr_str);
 
     template<typename invocable_t>
-        requires std::is_invocable_r_v<expected_hdl_ret, invocable_t, const http::query_t&, const http::header_t&>
+        requires std::is_invocable_r_v<handler_response, invocable_t, const http::query_t&, const http::header_t&>
     app& GET(std::string_view path, invocable_t& handler);
 
-    app& GET(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&) -> expected_hdl_ret);
+    app& GET(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&) -> handler_response);
 
     template<typename invocable_t>
-        requires std::is_invocable_r_v<expected_hdl_ret, invocable_t, const http::query_t&, const http::header_t&, const http::body_t&>
+        requires std::is_invocable_r_v<handler_response, invocable_t, const http::query_t&, const http::header_t&, const http::body_t&>
     app& POST(std::string_view path, invocable_t& handler);
 
-    app& POST(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&, const http::body_t&) -> expected_hdl_ret);
+    app& POST(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&, const http::body_t&) -> handler_response);
 
     void run();
 };
 
 template<typename invocable_t>
-    requires std::is_invocable_r_v<expected_hdl_ret, invocable_t, const http::query_t&, const http::header_t&>
+    requires std::is_invocable_r_v<handler_response, invocable_t, const http::query_t&, const http::header_t&>
 app& app::GET(std::string_view path, invocable_t& handler){
     using type = std::decay_t<invocable_t>;
-    if constexpr (std::is_same_v<type, auto (*)(const http::query_t&, const http::header_t&) -> expected_hdl_ret>) {
+    if constexpr (std::is_same_v<type, auto (*)(const http::query_t&, const http::header_t&) -> handler_response>) {
         return GET(path, nullptr, handler);
     } else {
-        return GET(path, &handler, [](void* helper_ptr, const http::query_t& query, const http::header_t& header) -> expected_hdl_ret {
-            constexpr auto (type::*func)(const http::query_t&, const http::header_t&) -> expected_hdl_ret = &type::operator();
+        return GET(path, &handler, [](void* helper_ptr, const http::query_t& query, const http::header_t& header) -> handler_response {
+            constexpr auto (type::*func)(const http::query_t&, const http::header_t&) -> handler_response = &type::operator();
 
             return (static_cast<invocable_t*>(helper_ptr)->*func)(query, header);
         });
@@ -92,14 +178,14 @@ app& app::GET(std::string_view path, invocable_t& handler){
 }
 
 template<typename invocable_t>
-    requires std::is_invocable_r_v<expected_hdl_ret, invocable_t, const http::query_t&, const http::header_t&, const http::body_t&>
+    requires std::is_invocable_r_v<handler_response, invocable_t, const http::query_t&, const http::header_t&, const http::body_t&>
 app& app::POST(std::string_view path, invocable_t& handler){
     using type = std::decay_t<invocable_t>;
-    if constexpr (std::is_same_v<type, auto (*)(const http::query_t&, const http::header_t&, const http::body_t&) -> expected_hdl_ret>) {
+    if constexpr (std::is_same_v<type, auto (*)(const http::query_t&, const http::header_t&, const http::body_t&) -> handler_response>) {
         return POST(path, nullptr, handler);
     } else {
-        return POST(path, &handler, [](void* helper_ptr, const http::query_t& query, const http::header_t& header, const http::body_t& body) -> expected_hdl_ret {
-            constexpr auto (type::*func)(const http::query_t&, const http::header_t&, const http::body_t&) -> expected_hdl_ret = &type::operator();
+        return POST(path, &handler, [](void* helper_ptr, const http::query_t& query, const http::header_t& header, const http::body_t& body) -> handler_response {
+            constexpr auto (type::*func)(const http::query_t&, const http::header_t&, const http::body_t&) -> handler_response = &type::operator();
 
             return (static_cast<invocable_t*>(helper_ptr)->*func)(query, header, body);
         });
@@ -110,3 +196,4 @@ app& app::POST(std::string_view path, invocable_t& handler){
 
 
 app& app();
+

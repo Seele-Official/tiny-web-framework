@@ -33,14 +33,6 @@ namespace seele::coro{
             }
 
         };
-    private:
-        using handle_type = std::coroutine_handle<promise_type>;
-
-        handle_type handle;
-
-
-    public:
-
         explicit lazy_task(promise_type* p): handle{handle_type::from_promise(*p)}{}
         lazy_task(lazy_task&& other) = delete;
         lazy_task(const lazy_task& other) = delete;
@@ -70,7 +62,9 @@ namespace seele::coro{
             }
             return std::move(handle.promise().value);
         }
-
+    private:
+        using handle_type = std::coroutine_handle<promise_type>;
+        handle_type handle;
     };
 
     // final_suspend suspend_never , so automatically destroyed

@@ -45,7 +45,7 @@ struct fd_wrapper {
         }
         return *this;
     }
-    operator int() const {
+    int get() const {
         return fd;
     }
     int release() {

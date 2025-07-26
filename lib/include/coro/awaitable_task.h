@@ -20,14 +20,11 @@ namespace seele::coro{
                 bool await_ready(){ return false; }
                 void await_resume(){}
                 std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type> h){
-                    if (auto previous = h.promise().previous; previous)
-                        return previous;
-                    else
-                        return std::noop_coroutine();
+                    return h.promise().previous;
                 }
             };
             auto final_suspend() noexcept {
-                return std::suspend_never{};
+                return final_awaiter{};
             }
             void unhandled_exception(){}
 

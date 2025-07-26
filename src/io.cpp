@@ -4,10 +4,10 @@
 fd_wrapper setup_socket(seele::net::ipv4 v4, size_t max_connections) {
     fd_wrapper fd_w = socket(PF_INET, SOCK_STREAM, 0);
     sockaddr_in addr = v4.to_sockaddr_in();
-    if (bind(fd_w, (sockaddr*)&addr, sizeof(addr)) < 0) {
+    if (bind(fd_w.get(), (sockaddr*)&addr, sizeof(addr)) < 0) {
         return fd_wrapper(-1);
     }
-    if (listen(fd_w, max_connections) < 0) {
+    if (listen(fd_w.get(), max_connections) < 0) {
         return fd_wrapper(-1);
     }
     return fd_w;
@@ -16,12 +16,12 @@ fd_wrapper setup_socket(seele::net::ipv4 v4, size_t max_connections) {
 int64_t get_file_size(const fd_wrapper& fd_w) {
     struct stat st;
 
-    if(fstat(fd_w, &st) < 0) {
+    if(fstat(fd_w.get(), &st) < 0) {
         return -1;
     }
     if (S_ISBLK(st.st_mode)) {
         int64_t bytes;
-        if (ioctl(fd_w, BLKGETSIZE64, &bytes) != 0) {
+        if (ioctl(fd_w.get(), BLKGETSIZE64, &bytes) != 0) {
             return -1;
         }
         return bytes;

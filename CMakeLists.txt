@@ -20,6 +20,7 @@ find_library(LIBURING_LIBRARY NAMES uring)
 if (NOT LIBURING_LIBRARY)
     message(FATAL_ERROR "liburing not found!")
 endif()
+message(STATUS "Found liburing: ${LIBURING_LIBRARY}")
 # link libraries
 
 target_link_libraries(web_server PRIVATE ${LIBURING_LIBRARY})

@@ -78,8 +78,8 @@ namespace http {
         res_msg() = default;
         res_msg(size_t status_code, header_t header, body_t body = "") : 
         stat_l(status_code), header(std::move(header)), body(std::move(body)) {
-            if (this->body.empty()) {
-                header.emplace("Content-Length", std::to_string(body.size()));
+            if (!this->body.empty()) {
+                this->header.emplace("Content-Length", std::to_string(this->body.size()));
             }
 
         }

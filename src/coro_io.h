@@ -2,6 +2,7 @@
 #include <coroutine>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <expected>
 #include <liburing.h>
 #include <liburing/io_uring.h>
@@ -14,7 +15,23 @@
 #include "coro_io_ctx.h"
 
 
+namespace coro_io::error{
+    constexpr int32_t SYS = -1;
+    constexpr int32_t CTX_CLOSED = -2;
+    constexpr int32_t TIMEOUT = -3;
+    
+    inline thread_local std::string_view msg = "";  
+
+    inline void set(std::string_view e){
+        msg = e;
+    }
+}
+
 namespace coro_io::awaiter {
+
+    
+
+
 
     // Because in higher versions of liburing, support CQE32 feature
     // CQE32 has flexible array member, which can not be used as a member of a class
@@ -39,20 +56,44 @@ namespace coro_io::awaiter {
     template<typename derived>
     struct base {
         int32_t io_ret;
+        std::coroutine_handle<> handle;
         bool await_ready() { return false; }
-        void await_suspend(std::coroutine_handle<void> handle) {
-            coro_io_ctx::get_instance().submit(
-                    handle,
-                    &io_ret,
-                    false, 
-                    nullptr, 
+        std::coroutine_handle<> await_suspend(std::coroutine_handle<> handle) {
+            this->handle = handle;
+            if(coro_io_ctx::get_instance().submit(
                     this, 
-                    [](void* helper_ptr, io_uring_sqe* sqe) {
-                        static_cast<derived*>(helper_ptr)->setup(sqe);
+                    [](void* helper_ptr, io_uring* ring) {
+                        return static_cast<decltype(this)>(helper_ptr)->init(ring);
                     }
-            );
+                )
+            ) {
+                return std::noop_coroutine();
+            }
+            error::set("Coro ctx closed.");
+            this->io_ret = error::CTX_CLOSED;
+            return this->handle;
         }
-        int32_t await_resume() { return io_ret; }
+        int32_t await_resume() {
+            if (io_ret < 0) {
+                error::set(strerror(-io_ret));
+                return error::SYS;
+            }
+            return io_ret; 
+        }
+
+        int init(io_uring* ring) {
+            auto* sqe = io_uring_get_sqe(ring);
+            static_cast<derived*>(this)->setup(sqe);
+            sqe->user_data = std::bit_cast<std::uintptr_t>(
+                coro_io_ctx::get_instance().new_usr_data(
+                    coro_io_ctx::io_usr_data{
+                        this->handle,
+                        &this->io_ret
+                    }
+                )
+            );
+            return 1;
+        }
 
         void setup(io_uring_sqe* sqe) { std::terminate();} // Default setup, can be overridden by derived classes
     };
@@ -142,22 +183,57 @@ namespace coro_io::awaiter {
         __kernel_timespec ts;
         io_awaiter_t awaiter;
         bool await_ready() { return false; }
-        void await_suspend(std::coroutine_handle<void> handle) {
-            coro_io_ctx::get_instance().submit(
-                    handle,
-                    &awaiter.io_ret,
-                    true, 
-                    &ts, 
-                    &awaiter, 
-                    [](void* helper_ptr, io_uring_sqe* sqe) {
-                        static_cast<io_awaiter_t*>(helper_ptr)->setup(sqe);
+        std::coroutine_handle<> await_suspend(std::coroutine_handle<> handle) {
+            this->awaiter.handle = handle;
+            if(coro_io_ctx::get_instance().submit(
+                    this, 
+                    [](void* helper_ptr, io_uring* ring) {
+                        return static_cast<decltype(this)>(helper_ptr)->init(ring);
                     }
-                
-            );
+                )
+            ) {
+                return std::noop_coroutine();
+            }
+            error::set("Coro ctx closed.");
+            this->awaiter.io_ret = error::CTX_CLOSED;
+            return this->awaiter.handle;
         }
-        std::optional<int32_t> await_resume() { 
-            if (awaiter.io_ret == -ECANCELED) {
-                return std::nullopt;
+        int init(io_uring* ring) {
+            auto* sqe = io_uring_get_sqe(ring);
+            auto* timeout_sqe = io_uring_get_sqe(ring);
+            // Need to handle validation of sqe, but we assume the it's valid
+            this->awaiter.setup(sqe);
+            auto io_data = coro_io_ctx::get_instance().new_usr_data(
+                coro_io_ctx::io_usr_data{
+                    this->awaiter.handle,
+                    &this->awaiter.io_ret
+                }
+            );  
+
+            sqe->user_data = std::bit_cast<std::uintptr_t>(io_data);
+
+            sqe->flags |= IOSQE_IO_LINK;
+
+            io_uring_prep_link_timeout(timeout_sqe, &this->ts, 0);
+
+            timeout_sqe->user_data = std::bit_cast<std::uintptr_t>(
+                coro_io_ctx::get_instance().new_usr_data(
+                    coro_io_ctx::timeout_usr_data{
+                        io_data
+                    }
+                )
+            );
+            return 2;
+        }
+
+        int32_t await_resume() { 
+            if (awaiter.io_ret < 0){
+                if (awaiter.io_ret == -ECANCELED) {
+                    error::set("Time out.");
+                    return error::TIMEOUT;
+                }
+                error::set(strerror(-awaiter.io_ret));
+                return error::SYS;
             }
             return awaiter.io_ret;
         }
