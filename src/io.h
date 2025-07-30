@@ -133,6 +133,6 @@ struct mmap_wrapper{
 };
 
 
-fd_wrapper setup_socket(seele::net::ipv4 v4, size_t max_connections);
+fd_wrapper setup_socket(seele::net::ipv4 v4, size_t max_connections, auto (*setup)(int) -> void);
 
 int64_t get_file_size(const fd_wrapper& fd_w);

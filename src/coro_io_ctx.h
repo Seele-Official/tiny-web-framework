@@ -17,6 +17,9 @@
 constexpr size_t submit_threshold = 64;
 
 namespace coro_io {
+
+
+    
 class ctx{
 public:      
     struct request{        
@@ -51,9 +54,22 @@ public:
         return data_ptr;
     }
 
+    inline int32_t register_file_alloc_range(uint32_t off, uint32_t len) {
+        return io_uring_register_file_alloc_range(&ring, off, len);
+    }
 
+    inline int32_t register_files_sparse(uint32_t count) {
+        return io_uring_register_files_sparse(&ring, count);
+    }
 
-    bool submit(void* helper_ptr, auto (*ring_handle)(void*, io_uring*) -> int) {
+    inline int32_t register_files(const int32_t* fds, uint32_t count) {
+        return io_uring_register_files(&ring, fds, count);
+    }
+    inline int32_t unregister_files() {
+        return io_uring_unregister_files(&ring);
+    }
+
+    inline bool submit(void* helper_ptr, auto (*ring_handle)(void*, io_uring*) -> int) {
         if (this->is_worker_running.load(std::memory_order_acquire)){
             this->unprocessed_requests.emplace_back(helper_ptr, ring_handle);
             this->unp_sem.release();            
@@ -81,6 +97,8 @@ private:
     void worker(std::stop_token st);
 
     void start_listen(std::stop_token st);
+
+    void handle_cqes(io_uring_cqe* cqe);
 
     ctx(uint32_t entries = 128, uint32_t flags = 0) : max_entries{entries}, pending_req_count{0}, unp_sem{0}, usr_data_pool{1024*128} {
         if(io_uring_queue_init(entries, &ring, flags) < 0) {

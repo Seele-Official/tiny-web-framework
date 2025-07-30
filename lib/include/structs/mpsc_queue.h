@@ -13,18 +13,19 @@ namespace seele::structs {
 
     template<typename T, size_t MAX_NODES = 64>
     struct mpsc_chunk{
-        struct node_t{
-            enum status_t {
-                EMPTY,
-                READY,
-                USED
-            };
-
-            T data;
-            std::atomic<status_t> status;
-            node_t() : data{}, status(EMPTY) {}
+        enum status_t {
+            EMPTY,
+            READY,
+            USED
         };
-
+        struct node_t{
+            alignas(T) std::byte storage[sizeof(T)];
+            std::atomic<status_t> status;
+            T& get() {
+                return *std::launder(reinterpret_cast<T*>(&storage));
+            }
+            node_t() : storage{}, status(EMPTY) {}
+        };
         node_t data[MAX_NODES];
         size_t read_index;
         std::atomic<size_t> write_index;
@@ -47,13 +48,13 @@ namespace seele::structs {
         }
 
         
-        while (data[this->read_index].status.load(std::memory_order_acquire) != node_t::READY) {
+        while (data[this->read_index].status.load(std::memory_order_acquire) != READY) {
             // wait until the data is ready
         }
 
-        T result = std::move(data[this->read_index].data);
-        data[this->read_index].status.store(node_t::USED, std::memory_order_release);
-        
+        T result = std::move(data[this->read_index].get());
+        data[this->read_index].get().~T();
+        data[this->read_index].status.store(USED, std::memory_order_release);
         this->read_index++;
         return result;
     }
@@ -64,30 +65,22 @@ namespace seele::structs {
 
         while (true) {
             size_t write_idx = write_index.load(std::memory_order_acquire);
-            if (write_idx >= MAX_NODES) {
+            if (write_idx == MAX_NODES) {
                 return false; // chunk is full
             }
             if (this->write_index.compare_exchange_strong(write_idx, write_idx + 1, std::memory_order_release, std::memory_order_relaxed)){
                 // construct new value in place
-                new (&data[write_idx].data) T(std::forward<args_t>(args)...);
-                data[write_idx].status.store(node_t::READY, std::memory_order_release);
+                new (&data[write_idx].storage) T(std::forward<args_t>(args)...);
+                data[write_idx].status.store(READY, std::memory_order_release);
                 return true; // successfully added
             }
         }
     }
     template<typename T, size_t MAX_NODES>
     mpsc_chunk<T, MAX_NODES>::~mpsc_chunk(){
-
-        auto view = data
-            | std::views::drop(read_index)
-            | std::views::take(write_index.load(std::memory_order_acquire) - read_index);
-        for (auto& node : view) {
-            while (node.status.load(std::memory_order_acquire) != node_t::READY) {
-                std::this_thread::yield(); // wait until the data is ready
-            }
-            node.data.~T(); // call destructor if the data was constructed
+        for (size_t i = read_index; i < write_index; ++i) {
+            data[i].get().~T(); // call destructor if the data was constructed
         }
-
     };
 
 
@@ -109,7 +102,6 @@ namespace seele::structs {
         
         std::optional<T> pop_front();
         
-        bool is_empty() const;
 
     private:
         alignas(64) chunk_t* head_chunk;

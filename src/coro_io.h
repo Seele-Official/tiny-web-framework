@@ -15,14 +15,36 @@
 #include "coro_io_ctx.h"
 
 
+namespace coro_io {
+    int32_t register_files(const int32_t* fds, uint32_t count){
+        return ctx::get_instance().register_files(fds, count);
+    }
+    int32_t unregister_files() {
+        return ctx::get_instance().unregister_files();
+    }
+    int32_t register_file_alloc_range(uint32_t off, uint32_t len) {
+        return ctx::get_instance().register_file_alloc_range(off, len);
+    }
+    int32_t register_files_sparse(uint32_t count) {
+        return ctx::get_instance().register_files_sparse(count);
+    }
+}
+
+
 namespace coro_io::error{
     constexpr int32_t SYS = -1;
     constexpr int32_t CTX_CLOSED = -2;
     constexpr int32_t TIMEOUT = -3;
     
     inline thread_local std::string_view msg = "";  
+    inline thread_local int32_t code = 0;
 
-    inline void set(std::string_view e){
+    inline void set_code(int32_t e){
+        code = -e;
+        msg = strerror(-e);
+    }
+
+    inline void set_msg(std::string_view e){
         msg = e;
     }
 }
@@ -69,13 +91,13 @@ namespace coro_io::awaiter {
             ) {
                 return std::noop_coroutine();
             }
-            error::set("Coro ctx closed.");
+            error::set_msg("Coro ctx closed.");
             this->io_ret = error::CTX_CLOSED;
             return this->handle;
         }
         int32_t await_resume() {
             if (io_ret < 0) {
-                error::set(strerror(-io_ret));
+                error::set_code(io_ret);
                 return error::SYS;
             }
             return io_ret; 
@@ -112,6 +134,20 @@ namespace coro_io::awaiter {
             io_uring_prep_read(sqe, fd, buf, len, offset);
         }
     };
+    struct read_direct : base<read_direct> {
+        int fd_index;
+        void* buf;
+        size_t len;
+        off_t offset;
+
+        read_direct(int fd_index, void* buf, size_t len, off_t offset = 0)
+            : fd_index(fd_index), buf(buf), len(len), offset(offset) {}
+
+        void setup(io_uring_sqe* sqe) {
+            io_uring_prep_read(sqe, fd_index, buf, len, offset);
+            sqe->flags |= IOSQE_FIXED_FILE;
+        }
+    };
 
 
     struct write : base<write> {
@@ -125,6 +161,21 @@ namespace coro_io::awaiter {
 
         void setup(io_uring_sqe* sqe) {
             io_uring_prep_write(sqe, fd, buf, len, offset);
+        }
+    };
+
+    struct write_direct : base<write_direct> {
+        int fd_index;
+        const void* buf;
+        unsigned int len;
+        off_t offset;
+
+        write_direct(int fd_index, const void* buf, unsigned int len, off_t offset = 0)
+            : fd_index(fd_index), buf(buf), len(len), offset(offset) {}
+
+        void setup(io_uring_sqe* sqe) {
+            io_uring_prep_write(sqe, fd_index, buf, len, offset);
+            sqe->flags |= IOSQE_FIXED_FILE;
         }
     };
 
@@ -159,6 +210,21 @@ namespace coro_io::awaiter {
         }
     };
 
+    struct writev_direct : base<writev_direct> {
+        int fd_index;
+        const iovec* iov;
+        unsigned nr_iov;
+        off_t offset;
+
+        writev_direct(int fd_index, const iovec* iov, unsigned nr_iov, off_t offset = 0)
+            : fd_index(fd_index), iov(iov), nr_iov(nr_iov), offset(offset) {}
+
+        void setup(io_uring_sqe* sqe) {
+            io_uring_prep_writev(sqe, fd_index, iov, nr_iov, offset);
+            sqe->flags |= IOSQE_FIXED_FILE;
+        }
+    };
+
 
 
     struct accept : base<accept> {
@@ -170,6 +236,27 @@ namespace coro_io::awaiter {
             : fd(fd), addr(addr), addrlen(addrlen), flags(flags) {}
         void setup(io_uring_sqe* sqe) {
             io_uring_prep_accept(sqe, fd, addr, addrlen, flags);
+        }
+    };
+
+    struct accept_direct : base<accept_direct> {
+        int fd;
+        sockaddr* addr;
+        socklen_t* addrlen;
+        int flags;
+        unsigned int file_index;
+        accept_direct(int fd, sockaddr* addr, socklen_t* addrlen, int flags = 0, unsigned int file_index = IORING_FILE_INDEX_ALLOC)
+            : fd(fd), addr(addr), addrlen(addrlen), flags(flags), file_index(file_index) {}
+        void setup(io_uring_sqe* sqe) {
+            io_uring_prep_accept_direct(sqe, fd, addr, addrlen, flags, file_index);
+        }
+    };
+
+    struct close_direct : base<close_direct> {
+        int fd_index;
+        close_direct(int fd_index) : fd_index(fd_index) {}
+        void setup(io_uring_sqe* sqe) {
+            io_uring_prep_close_direct(sqe, fd_index);
         }
     };
 
@@ -194,7 +281,7 @@ namespace coro_io::awaiter {
             ) {
                 return std::noop_coroutine();
             }
-            error::set("Coro ctx closed.");
+            error::set_msg("Coro ctx closed.");
             this->awaiter.io_ret = error::CTX_CLOSED;
             return this->awaiter.handle;
         }
@@ -229,10 +316,10 @@ namespace coro_io::awaiter {
         int32_t await_resume() { 
             if (awaiter.io_ret < 0){
                 if (awaiter.io_ret == -ECANCELED) {
-                    error::set("Time out.");
+                    error::set_msg("Time out.");
                     return error::TIMEOUT;
                 }
-                error::set(strerror(-awaiter.io_ret));
+                error::set_code(awaiter.io_ret);
                 return error::SYS;
             }
             return awaiter.io_ret;

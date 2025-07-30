@@ -2,26 +2,27 @@
 #include <atomic>
 #include <cstddef>
 #include <memory>
+#include <new>
 #include <optional>
-#include <thread>
-#include <ranges>
 #include <algorithm>
 #include <utility>
 #include "hp.h" 
 namespace seele::structs {
 
     template<typename T, size_t MAX_NODES = 64>
-    struct msc_chunk{
+    struct msc_chunk{            
+        enum status_t {
+            EMPTY,
+            READY,
+            USED
+        };
         struct node_t{
-            enum status_t {
-                EMPTY,
-                READY,
-                USED
-            };
-
-            T data;
+            alignas(T) std::byte storage[sizeof(T)];
             std::atomic<status_t> status;
-            node_t() : data{}, status(EMPTY) {}
+            T& get() {
+                return *std::launder(reinterpret_cast<T*>(&storage));
+            }
+            node_t() : storage{}, status(EMPTY) {}
         };
 
         node_t data[MAX_NODES];
@@ -43,17 +44,18 @@ namespace seele::structs {
         while (true) {
             size_t read_idx = read_index.load(std::memory_order_acquire);
             size_t write_idx = write_index.load(std::memory_order_acquire);
-            if (read_idx >= write_idx) {
+            if (read_idx == write_idx) {
                 return std::nullopt; // no elements to pop
             }
 
             if (this->read_index.compare_exchange_strong(read_idx, read_idx + 1, std::memory_order_release, std::memory_order_relaxed)) {
-                while (data[read_idx].status.load(std::memory_order_acquire) != node_t::READY) {
+                while (data[read_idx].status.load(std::memory_order_acquire) != READY) {
                     // wait until the data is ready
                 }
 
-                T result = std::move(data[read_idx].data);
-                data[read_idx].status.store(node_t::USED, std::memory_order_release);
+                T result = std::move(data[read_idx].get());
+                data[read_idx].get().~T();
+                data[read_idx].status.store(USED, std::memory_order_release);
                 return result;
             }                
         }
@@ -66,30 +68,22 @@ namespace seele::structs {
 
         while (true) {
             size_t write_idx = write_index.load(std::memory_order_acquire);
-            if (write_idx >= MAX_NODES) {
+            if (write_idx == MAX_NODES) {
                 return false; // chunk is full
             }
             if (this->write_index.compare_exchange_strong(write_idx, write_idx + 1, std::memory_order_release, std::memory_order_relaxed)){
                 // construct new value in place
-                new (&data[write_idx].data) T(std::forward<args_t>(args)...);
-                data[write_idx].status.store(node_t::READY, std::memory_order_release);
+                new (&data[write_idx].storage) T(std::forward<args_t>(args)...);
+                data[write_idx].status.store(READY, std::memory_order_release);
                 return true; // successfully added
             }
         }
     }
     template<typename T, size_t MAX_NODES>
     msc_chunk<T, MAX_NODES>::~msc_chunk(){
-
-        auto view = data
-            | std::views::drop(read_index.load(std::memory_order_acquire))
-            | std::views::take(write_index.load(std::memory_order_acquire) - read_index.load(std::memory_order_acquire));
-        for (auto& node : view) {
-            while (node.status.load(std::memory_order_acquire) != node_t::READY) {
-                std::this_thread::yield(); // wait until the data is ready
-            }
-            node.data.~T(); // call destructor if the data was constructed
+        for (size_t i = read_index; i < write_index; ++i) {
+            data[i].get().~T(); // call destructor if the data was constructed
         }
-
     };
 
 
@@ -110,8 +104,6 @@ namespace seele::structs {
         void emplace_back(args_t&&... args);
         
         std::optional<T> pop_front();
-        
-        bool is_empty() const;
 
     private:
         alignas(64) std::atomic<chunk_t*> head_chunk;

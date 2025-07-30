@@ -1,7 +1,9 @@
 #include "server.h"
 
 
+#include <asm-generic/socket.h>
 #include <atomic>
+#include <cerrno>
 #include <coroutine>
 #include <cstdint>
 #include <cstring>
@@ -22,6 +24,7 @@
 #include <filesystem>
 #include <csignal>
 #include <utility>
+#include <vector>
 
 #include "coro/task.h"
 #include "io.h"
@@ -40,8 +43,7 @@ namespace web {
 namespace env {
     static std::filesystem::path root_path = std::filesystem::current_path() / "www";
     static net::ipv4 addr;
-    static fd_wrapper fd_w;
-
+    static std::vector<fd_wrapper> accepter_fd_list;
     static std::unordered_map<std::string, mmap_wrapper> file_caches{};
 
     std::expected<iovec, http::status_code> get_file_cache(const std::filesystem::path& path) {
@@ -279,7 +281,6 @@ handler_response handle_req(const http::req_msg& req){
 coro::task async_handle_connection(int fd, net::ipv4 addr) {
     fd_wrapper fd_w(fd);
     net::ipv4 client_addr = addr;
-    log::async().info("Accepted connection from {}", client_addr.toString());
     co_await coro::thread::dispatch_awaiter{};
 
     char read_buffer[8192];
@@ -335,18 +336,16 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
 
 
 
-coro::task server_loop() {
-
+coro::task server_loop(int32_t _fd) {
+    int32_t fd = _fd;
     co_await coro::thread::dispatch_awaiter{};
     while(true){
         sockaddr_in client_addr;
         socklen_t client_addr_len = sizeof(client_addr);
 
-        int32_t res = co_await coro_io::awaiter::link_timeout{
-            coro_io::awaiter::accept{env::fd_w.get(), (sockaddr *)&client_addr, &client_addr_len},
-            5s
-        };
-        switch (res) {
+        int32_t ret = co_await 
+            coro_io::awaiter::accept{fd, (sockaddr *)&client_addr, &client_addr_len};
+        switch (ret) {
             case coro_io::error::SYS:
             case coro_io::error::CTX_CLOSED:
                 log::async().error("Failed to accept connection: {}", coro_io::error::msg);
@@ -358,8 +357,9 @@ coro::task server_loop() {
                 break;
         
         }
-        
-        async_handle_connection(res, net::ipv4::from_sockaddr_in(client_addr));
+        auto ipv4_addr = net::ipv4::from_sockaddr_in(client_addr);
+        log::async().info("Fd[{}]: Accepted connection from {}", fd, ipv4_addr.toString());
+        async_handle_connection(ret, ipv4_addr);
     }
 
     co_return;
@@ -414,12 +414,6 @@ struct app& app::set_addr(std::string_view addr_str) {
         std::println("Failed to parse address: {}", parsed.error());
         std::terminate();
     }
-    web::env::fd_w = setup_socket(web::env::addr, 10240);
-
-    if (!web::env::fd_w.is_valid()){
-        std::println("Failed to create socket, error: {}", strerror(errno));
-        std::terminate();
-    }
     return *this;
 }
 
@@ -439,13 +433,30 @@ void app::run(){
         std::println("Server address is not valid");
         std::terminate();
     }
-    web::server_loop();
-    
+    constexpr size_t accepter_count = 16;
+    constexpr size_t max_accepter_connections = 256;
+    web::env::accepter_fd_list.reserve(accepter_count);
+    for (size_t i = 0; i < accepter_count; ++i) {
+        auto fd_w = setup_socket(web::env::addr, max_accepter_connections, [](int fd) {
+            int opt = 1;
+            setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt));
+        });
+        if (!fd_w.is_valid()) {
+            std::println("Failed to setup socket: {}", strerror(errno));
+            std::terminate();
+        }
+        web::env::accepter_fd_list.push_back(std::move(fd_w));
+    }
+
+    for (uint32_t i = 0; i < web::env::accepter_fd_list.size(); ++i) {
+        web::server_loop(web::env::accepter_fd_list[i].get());
+    }    
+
     std::signal(SIGINT, [](int) {
         std::println("Received SIGINT, stopping server...");
-        close(web::env::fd_w.release());
         coro_io::ctx::get_instance().request_stop();
-        
+        web::env::accepter_fd_list.clear();  
+        std::println("Server stopped.");
     });
     coro_io::ctx::get_instance().run();
 }
