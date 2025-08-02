@@ -9,6 +9,7 @@
 #include <coroutine>
 #include <cstddef>
 #include <cstring>
+#include <exception>
 #include <liburing.h>
 #include <optional>
 #include <print>
@@ -76,16 +77,12 @@ void ctx::handle_cqes(io_uring_cqe* cqe) {
                     switch (cqe->res) {
                         case -ETIME:
                         case -ECANCELED:
-                            break; // Timeout or canceled, skip this cqe
+                        case -ENOENT:
+                            break; // Timeout or canceled or no entry, skip this cqe
                         default:{
-                            // The chain of timeout req is broken, because the io req in error state
-                            // Io uring only return error of the io req, so we need transfer the error
                             auto* io_data = std::get_if<io_usr_data>(usr_data.io_data);
-                            *io_data->io_ret = cqe->res;
                             std::println("Timeout req is broken, handle {}, {}", math::tohex(io_data->handle), cqe->res);
-                            coro::thread::dispatch(io_data->handle);
-                            this->usr_data_pool.deallocate(usr_data.io_data); // Clean up the io data
-                            this->pending_req_count.fetch_sub(1, std::memory_order_release);
+                            std::terminate();
                         }
                     }
                 } else {

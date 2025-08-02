@@ -26,6 +26,7 @@
 #include <utility>
 #include <vector>
 
+#include "coro/lazy_task.h"
 #include "coro/task.h"
 #include "io.h"
 #include "log.h"
@@ -365,6 +366,11 @@ coro::task server_loop(int32_t _fd) {
     co_return;
 }
 
+coro::task cancel(int32_t fd) {
+    if (co_await coro_io::awaiter::cancel_fd{fd} != 0){
+        std::println("Failed to cancel fd: {}", fd);
+    }
+}
 } // namespace web
 
 
@@ -433,7 +439,7 @@ void app::run(){
         std::println("Server address is not valid");
         std::terminate();
     }
-    constexpr size_t accepter_count = 16;
+    constexpr size_t accepter_count = 8;
     constexpr size_t max_accepter_connections = 256;
     web::env::accepter_fd_list.reserve(accepter_count);
     for (size_t i = 0; i < accepter_count; ++i) {
@@ -454,9 +460,10 @@ void app::run(){
 
     std::signal(SIGINT, [](int) {
         std::println("Received SIGINT, stopping server...");
-        coro_io::ctx::get_instance().request_stop();
-        web::env::accepter_fd_list.clear();  
-        std::println("Server stopped.");
+        for (auto& fd : web::env::accepter_fd_list) {
+            web::cancel(fd.get());
+        }
+        coro_io::ctx::get_instance().request_stop(); 
     });
     coro_io::ctx::get_instance().run();
 }

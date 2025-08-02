@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <climits>
 #include <cstddef>
 #include <semaphore>
@@ -35,6 +36,7 @@ namespace seele::coro::thread {
     };
 
     inline auto dispatch(std::coroutine_handle<> handle) {
+        std::atomic_thread_fence(std::memory_order_release);
         thread_pool_impl::get_instance().submit(handle);
     }    
 
@@ -45,7 +47,9 @@ namespace seele::coro::thread {
             dispatch(handle);
         }
 
-        void await_resume() {}
+        void await_resume() {
+            std::atomic_thread_fence(std::memory_order_acquire);
+        }
 
         explicit dispatch_awaiter(){}
     };

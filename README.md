@@ -37,7 +37,7 @@ The Tiny Webserver is a lightweight, high-performance server built with modern C
 After building, you can run the server:
 
 ```sh
-./web_server -a 127.0.0.1:80 -p /home/seele/webserver/static
+./web_server -a 127.0.0.1:8080 -p /home/seele/webserver/static
 ```
 
 The server will listen for HTTP requests on the specified port.

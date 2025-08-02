@@ -51,11 +51,10 @@ namespace seele::structs {
         if (next_idx == head.load(std::memory_order_acquire)) {
             return nullptr; // No free object available
         }
-        void* obj = free_list[idx];
+        T* obj = new(free_list[idx]) T(std::forward<args_t>(args)...);
         free_list[idx] = nullptr; // Mark as used
         tail.store(next_idx, std::memory_order_release);
-        return new (obj) T(std::forward<args_t>(args)...);
-
+        return obj;
     }
 
     template <typename T>

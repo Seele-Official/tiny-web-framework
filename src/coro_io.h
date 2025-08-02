@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <coroutine>
 #include <cstddef>
 #include <cstdint>
@@ -81,6 +82,7 @@ namespace coro_io::awaiter {
         std::coroutine_handle<> handle;
         bool await_ready() { return false; }
         std::coroutine_handle<> await_suspend(std::coroutine_handle<> handle) {
+            std::atomic_thread_fence(std::memory_order_release);
             this->handle = handle;
             if(ctx::get_instance().submit(
                     this, 
@@ -96,6 +98,7 @@ namespace coro_io::awaiter {
             return this->handle;
         }
         int32_t await_resume() {
+            std::atomic_thread_fence(std::memory_order_acquire);
             if (io_ret < 0) {
                 error::set_code(io_ret);
                 return error::SYS;
@@ -134,21 +137,6 @@ namespace coro_io::awaiter {
             io_uring_prep_read(sqe, fd, buf, len, offset);
         }
     };
-    struct read_direct : base<read_direct> {
-        int fd_index;
-        void* buf;
-        size_t len;
-        off_t offset;
-
-        read_direct(int fd_index, void* buf, size_t len, off_t offset = 0)
-            : fd_index(fd_index), buf(buf), len(len), offset(offset) {}
-
-        void setup(io_uring_sqe* sqe) {
-            io_uring_prep_read(sqe, fd_index, buf, len, offset);
-            sqe->flags |= IOSQE_FIXED_FILE;
-        }
-    };
-
 
     struct write : base<write> {
         int fd;
@@ -161,6 +149,61 @@ namespace coro_io::awaiter {
 
         void setup(io_uring_sqe* sqe) {
             io_uring_prep_write(sqe, fd, buf, len, offset);
+        }
+    };
+
+    struct readv : base<readv> {
+        int fd;
+        const iovec* iov;
+        unsigned nr_iov;
+        off_t offset;
+
+        readv(int fd, const iovec* iov, unsigned nr_iov = 1, off_t offset = 0)
+            : fd(fd), iov(iov), nr_iov(nr_iov), offset(offset) {}
+
+        void setup(io_uring_sqe* sqe) {
+            io_uring_prep_readv(sqe, fd, iov, nr_iov, offset);
+        }
+    };
+
+    struct writev : base<writev> {
+        int fd;
+        const iovec* iov;
+        unsigned nr_iov;
+        off_t offset;
+        writev() = default;
+        writev(int fd, const iovec* iov, unsigned nr_iov, off_t offset = 0)
+            : fd(fd), iov(iov), nr_iov(nr_iov), offset(offset) {}
+
+        void setup(io_uring_sqe* sqe) {
+            io_uring_prep_writev(sqe, fd, iov, nr_iov, offset);
+        }
+    };
+
+    struct accept : base<accept> {
+        int fd;
+        sockaddr* addr;
+        socklen_t* addrlen;
+        int flags;
+        accept(int fd, sockaddr* addr, socklen_t* addrlen, int flags = 0)
+            : fd(fd), addr(addr), addrlen(addrlen), flags(flags) {}
+        void setup(io_uring_sqe* sqe) {
+            io_uring_prep_accept(sqe, fd, addr, addrlen, flags);
+        }
+    };
+
+    struct read_direct : base<read_direct> {
+        int fd_index;
+        void* buf;
+        size_t len;
+        off_t offset;
+
+        read_direct(int fd_index, void* buf, size_t len, off_t offset = 0)
+            : fd_index(fd_index), buf(buf), len(len), offset(offset) {}
+
+        void setup(io_uring_sqe* sqe) {
+            io_uring_prep_read(sqe, fd_index, buf, len, offset);
+            sqe->flags |= IOSQE_FIXED_FILE;
         }
     };
 
@@ -179,37 +222,6 @@ namespace coro_io::awaiter {
         }
     };
 
-
-    struct readv : base<readv> {
-        int fd;
-        const iovec* iov;
-        unsigned nr_iov;
-        off_t offset;
-
-        readv(int fd, const iovec* iov, unsigned nr_iov = 1, off_t offset = 0)
-            : fd(fd), iov(iov), nr_iov(nr_iov), offset(offset) {}
-
-        void setup(io_uring_sqe* sqe) {
-            io_uring_prep_readv(sqe, fd, iov, nr_iov, offset);
-        }
-    };
-
-
-
-    struct writev : base<writev> {
-        int fd;
-        const iovec* iov;
-        unsigned nr_iov;
-        off_t offset;
-        writev() = default;
-        writev(int fd, const iovec* iov, unsigned nr_iov, off_t offset = 0)
-            : fd(fd), iov(iov), nr_iov(nr_iov), offset(offset) {}
-
-        void setup(io_uring_sqe* sqe) {
-            io_uring_prep_writev(sqe, fd, iov, nr_iov, offset);
-        }
-    };
-
     struct writev_direct : base<writev_direct> {
         int fd_index;
         const iovec* iov;
@@ -222,20 +234,6 @@ namespace coro_io::awaiter {
         void setup(io_uring_sqe* sqe) {
             io_uring_prep_writev(sqe, fd_index, iov, nr_iov, offset);
             sqe->flags |= IOSQE_FIXED_FILE;
-        }
-    };
-
-
-
-    struct accept : base<accept> {
-        int fd;
-        sockaddr* addr;
-        socklen_t* addrlen;
-        int flags;
-        accept(int fd, sockaddr* addr, socklen_t* addrlen, int flags = 0)
-            : fd(fd), addr(addr), addrlen(addrlen), flags(flags) {}
-        void setup(io_uring_sqe* sqe) {
-            io_uring_prep_accept(sqe, fd, addr, addrlen, flags);
         }
     };
 
@@ -260,7 +258,13 @@ namespace coro_io::awaiter {
         }
     };
 
-
+    struct cancel_fd : base<cancel_fd> {
+        int fd;
+        cancel_fd(int fd) : fd(fd) {}
+        void setup(io_uring_sqe* sqe) {
+            io_uring_prep_cancel_fd(sqe, fd, 0);
+        }
+    };
 
 
 
@@ -271,6 +275,7 @@ namespace coro_io::awaiter {
         io_awaiter_t awaiter;
         bool await_ready() { return false; }
         std::coroutine_handle<> await_suspend(std::coroutine_handle<> handle) {
+            std::atomic_thread_fence(std::memory_order_release);
             this->awaiter.handle = handle;
             if(ctx::get_instance().submit(
                     this, 
@@ -314,6 +319,7 @@ namespace coro_io::awaiter {
         }
 
         int32_t await_resume() { 
+            std::atomic_thread_fence(std::memory_order_acquire);
             if (awaiter.io_ret < 0){
                 if (awaiter.io_ret == -ECANCELED) {
                     error::set_msg("Time out.");
