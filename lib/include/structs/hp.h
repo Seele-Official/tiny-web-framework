@@ -6,89 +6,90 @@
 #include <mutex>
 #include <unordered_map>
 namespace seele::structs {
-    namespace hp {
-        constexpr size_t max_hazard_count = 3;
-        constexpr size_t max_thread_count = 64;
-        constexpr size_t max_retired_count = 16;    
+    
+namespace hp {
+    constexpr size_t max_hazard_count = 3;
+    constexpr size_t max_thread_count = 64;
+    constexpr size_t max_retired_count = 16;    
+}
+
+class hazard_manager {
+public:        
+    hazard_manager() = default;
+
+    hazard_manager(const hazard_manager&) = delete;
+    hazard_manager& operator=(const hazard_manager&) = delete;
+    hazard_manager(hazard_manager&&) = delete;
+    hazard_manager& operator=(hazard_manager&&) = delete;
+
+    ~hazard_manager();
+
+    template<size_t index>
+        requires (index < hp::max_hazard_count)
+    void protect(void* ptr){
+        this->local_tls().record
+            ->hps[index].store(ptr, std::memory_order_release);
     }
 
-    class hazard_manager {
-    public:        
-        hazard_manager() = default;
 
-        hazard_manager(const hazard_manager&) = delete;
-        hazard_manager& operator=(const hazard_manager&) = delete;
-        hazard_manager(hazard_manager&&) = delete;
-        hazard_manager& operator=(hazard_manager&&) = delete;
+    template<size_t index>
+        requires (index < hp::max_hazard_count)
+    void clear(){
+        this->local_tls().record
+            ->hps[index].store(nullptr, std::memory_order_release);
+    }
 
-        ~hazard_manager();
+    void clear_all();
 
-        template<size_t index>
-            requires (index < hp::max_hazard_count)
-        void protect(void* ptr){
-            this->local_tls().record
-                ->hps[index].store(ptr, std::memory_order_release);
-        }
+    template<typename T>
+    void retire(T* ptr){
+        this->local_tls().retired_list.emplace_back(ptr, [](void* p){ delete static_cast<T*>(p); });
+        this->scan_tls_retired();
+    }
 
+    template<typename T>
+    void retire(T* ptr, auto (*deleter)(void*) -> void){
+        this->local_tls().retired_list.emplace_back(ptr, deleter);
+        this->scan_tls_retired();
+    }
+private:    
 
-        template<size_t index>
-            requires (index < hp::max_hazard_count)
-        void clear(){
-            this->local_tls().record
-                ->hps[index].store(nullptr, std::memory_order_release);
-        }
+    struct alignas(64) hazard_record_t {
+        std::array<std::atomic<void*>, hp::max_hazard_count> hps;
+        std::atomic<bool> active;
+    };
 
-        void clear_all();
+    struct retired_ptr_t {
+        void* ptr;
+        auto (*deleter)(void*) -> void;
+    };
+    
+    struct tls_data_t {
+        hazard_record_t* record;
+        std::list<retired_ptr_t> retired_list;
+    };
 
-        template<typename T>
-        void retire(T* ptr){
-            this->local_tls().retired_list.emplace_back(ptr, [](void* p){ delete static_cast<T*>(p); });
-            this->scan_tls_retired();
-        }
+    struct tls_map_t 
+    :std::unordered_map<hazard_manager*, tls_data_t>
+    {
+        ~tls_map_t();
+    };
 
-        template<typename T>
-        void retire(T* ptr, auto (*deleter)(void*) -> void){
-            this->local_tls().retired_list.emplace_back(ptr, deleter);
-            this->scan_tls_retired();
-        }
-    private:    
+    static thread_local tls_map_t tls_map;
 
-        struct alignas(64) hazard_record_t {
-            std::array<std::atomic<void*>, hp::max_hazard_count> hps;
-            std::atomic<bool> active;
-        };
+    hazard_record_t* allocate_record();
+    void deallocate_record(hazard_record_t* record);
 
-        struct retired_ptr_t {
-            void* ptr;
-            auto (*deleter)(void*) -> void;
-        };
-        
-        struct tls_data_t {
-            hazard_record_t* record;
-            std::list<retired_ptr_t> retired_list;
-        };
+    tls_data_t& local_tls();
+    void collect_thread_unretired(std::list<retired_ptr_t>& retireds);
 
-        struct tls_map_t 
-        :std::unordered_map<hazard_manager*, tls_data_t>
-        {
-            ~tls_map_t();
-        };
+    void scan_retired(std::list<retired_ptr_t>& retired_list);
+    void scan_tls_retired();
 
-        static thread_local tls_map_t tls_map;
-
-        hazard_record_t* allocate_record();
-        void deallocate_record(hazard_record_t* record);
-
-        tls_data_t& local_tls();
-        void collect_thread_unretired(std::list<retired_ptr_t>& retireds);
-
-        void scan_retired(std::list<retired_ptr_t>& retired_list);
-        void scan_tls_retired();
-
-        std::array<hazard_record_t, hp::max_thread_count> records;
-        std::list<retired_ptr_t> g_retired;
-        std::mutex g_retired_mutex;
-    };    
+    std::array<hazard_record_t, hp::max_thread_count> records;
+    std::list<retired_ptr_t> g_retired;
+    std::mutex g_retired_mutex;
+};    
 
 
 

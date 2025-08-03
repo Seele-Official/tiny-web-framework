@@ -5,6 +5,7 @@
 #include <print>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include "http.h"
 #include "io.h"

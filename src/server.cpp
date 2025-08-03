@@ -28,6 +28,7 @@
 
 #include "coro/lazy_task.h"
 #include "coro/task.h"
+#include "http.h"
 #include "io.h"
 #include "log.h"
 #include "coro_io.h"
@@ -266,6 +267,14 @@ handler_response handle_req(const http::req_msg& req){
                     return it->second(origin->query, req.header);
                 } else {
                     return handle_file_get(req);
+                }
+            }
+            return send_http_error(http::status_code::not_implemented);
+        }
+        case http::method_t::POST: {
+            if (auto origin = std::get_if<http::origin_form>(&req.line.target)) {
+                if(auto it = env::post_routings.find(origin->path); it != env::post_routings.end()) {
+                    return it->second(origin->query, req.header, req.body);
                 }
             }
             return send_http_error(http::status_code::not_implemented);

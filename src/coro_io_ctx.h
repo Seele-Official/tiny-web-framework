@@ -28,15 +28,20 @@ public:
     };
     struct io_usr_data;
     struct timeout_usr_data;
+    struct multishot_usr_data;
     using usr_data = std::variant<io_usr_data, timeout_usr_data>;
+
     struct io_usr_data{
         std::coroutine_handle<> handle;
         int32_t* io_ret;
     };
 
-
     struct timeout_usr_data{
         usr_data* io_data;
+    };
+
+    struct multishot_usr_data{
+        void (*callback)(int32_t);
     };
 
 
