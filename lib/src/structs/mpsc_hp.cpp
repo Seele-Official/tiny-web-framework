@@ -4,7 +4,6 @@
 #include "log.h"
 namespace seele::structs {
     
-thread_local mpsc_hazard_manager::tls_map_t mpsc_hazard_manager::tls_map{};
 mpsc_hazard_manager::~mpsc_hazard_manager() {            
     this->scan_retired();
     if (this->retired.size() > 0) {
@@ -35,6 +34,7 @@ inline void mpsc_hazard_manager::deallocate_record(hazard_record_t* record){
 
 
 mpsc_hazard_manager::hazard_record_t* mpsc_hazard_manager::local_tls() {
+    static thread_local tls_map_t tls_map{};
     auto it = tls_map.find(this);
     if (it != tls_map.end()) {
         return it->second;

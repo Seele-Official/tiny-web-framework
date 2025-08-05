@@ -33,7 +33,7 @@ public:
 
     struct io_usr_data{
         std::coroutine_handle<> handle;
-        int32_t* io_ret;
+        std::atomic<int32_t>* io_ret;
     };
 
     struct timeout_usr_data{
@@ -50,10 +50,13 @@ public:
     ctx& operator=(const ctx&) = delete;
     ctx& operator=(ctx&&) = delete;
 
-    usr_data* new_usr_data(usr_data data){
+    template<typename... args_t>
+    usr_data* new_usr_data(args_t&& ...args){
         usr_data* data_ptr;
         do {
-            data_ptr = this->usr_data_pool.allocate(data);
+            data_ptr = this->usr_data_pool.allocate(
+                std::forward<args_t>(args)...
+            );
         } while (data_ptr == nullptr);
 
         return data_ptr;

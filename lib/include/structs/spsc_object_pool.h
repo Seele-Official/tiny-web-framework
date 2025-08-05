@@ -60,8 +60,9 @@ T* spsc_object_pool<T>::allocate(args_t&&... args) {
 template <typename T>
 void spsc_object_pool<T>::deallocate(T* obj) {
     obj->~T();
+    size_t head = this->head.load(std::memory_order_acquire);
     free_list[head] = static_cast<void*>(obj); // Add back to free list
-    head.store((head.load(std::memory_order_acquire) + 1) % free_list.size(), std::memory_order_release);
+    this->head.store((head + 1) % free_list.size(), std::memory_order_release);
 }
 
 }

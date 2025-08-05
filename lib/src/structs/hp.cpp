@@ -33,6 +33,7 @@ inline void hazard_manager::deallocate_record(hazard_record_t* record){
 }
 
 hazard_manager::tls_data_t& hazard_manager::local_tls() {
+    static thread_local tls_map_t tls_map{};
     auto it = tls_map.find(this);
     if (it != tls_map.end()) {
         return it->second;
@@ -128,7 +129,5 @@ hazard_manager::~hazard_manager() {
         std::terminate();
     }
 }
-
-thread_local hazard_manager::tls_map_t hazard_manager::tls_map{};
 
 } // namespace seele::structs

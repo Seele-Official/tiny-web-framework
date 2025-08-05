@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <ctime>
 #include <expected>
 #include <liburing.h>
 #include <liburing/io_uring.h>
@@ -12,6 +13,7 @@
 #include <tuple>
 #include <errno.h>
 #include <type_traits>
+#include <utility>
 #include "meta.h"
 #include "coro_io_ctx.h"
 
@@ -78,11 +80,10 @@ namespace coro_io::awaiter {
 
     template<typename derived>
     struct base {
-        int32_t io_ret;
+        std::atomic<int32_t> io_ret;
         std::coroutine_handle<> handle;
         bool await_ready() { return false; }
         std::coroutine_handle<> await_suspend(std::coroutine_handle<> handle) {
-            std::atomic_thread_fence(std::memory_order_release);
             this->handle = handle;
             if(ctx::get_instance().submit(
                     this, 
@@ -98,7 +99,7 @@ namespace coro_io::awaiter {
             return this->handle;
         }
         int32_t await_resume() {
-            std::atomic_thread_fence(std::memory_order_acquire);
+            io_ret = this->io_ret.load(std::memory_order_acquire);
             if (io_ret < 0) {
                 error::set_code(io_ret);
                 return error::SYS;
@@ -268,14 +269,24 @@ namespace coro_io::awaiter {
 
 
 
+    struct kernel_ts : __kernel_timespec {
+        template<typename duration_t>
+            requires seele::meta::is_specialization_of_v<std::decay_t<duration_t>, std::chrono::duration>
+        kernel_ts (duration_t&& duration) {
+            this->tv_sec = std::chrono::duration_cast<std::chrono::seconds>(duration).count();
+            this->tv_nsec = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                duration - std::chrono::seconds(this->tv_sec)).count();
+        }
+    };
+
+
     template<typename io_awaiter_t>
         requires std::is_base_of_v<base<io_awaiter_t>, io_awaiter_t>
     struct link_timeout {
-        __kernel_timespec ts;
         io_awaiter_t awaiter;
+        kernel_ts ts;
         bool await_ready() { return false; }
         std::coroutine_handle<> await_suspend(std::coroutine_handle<> handle) {
-            std::atomic_thread_fence(std::memory_order_release);
             this->awaiter.handle = handle;
             if(ctx::get_instance().submit(
                     this, 
@@ -296,10 +307,9 @@ namespace coro_io::awaiter {
             // Need to handle validation of sqe, but we assume the it's valid
             this->awaiter.setup(sqe);
             auto io_data = ctx::get_instance().new_usr_data(
-                ctx::io_usr_data{
-                    this->awaiter.handle,
-                    &this->awaiter.io_ret
-                }
+                std::in_place_type<ctx::io_usr_data>,
+                this->awaiter.handle,
+                &this->awaiter.io_ret
             );  
 
             sqe->user_data = std::bit_cast<std::uintptr_t>(io_data);
@@ -319,32 +329,18 @@ namespace coro_io::awaiter {
         }
 
         int32_t await_resume() { 
-            std::atomic_thread_fence(std::memory_order_acquire);
-            if (awaiter.io_ret < 0){
-                if (awaiter.io_ret == -ECANCELED) {
+            auto io_ret = this->awaiter.io_ret.load(std::memory_order_acquire);
+            if (io_ret < 0){
+                if (io_ret == -ECANCELED) {
                     error::set_msg("Time out.");
                     return error::TIMEOUT;
                 }
-                error::set_code(awaiter.io_ret);
+                error::set_code(io_ret);
                 return error::SYS;
             }
-            return awaiter.io_ret;
+            return io_ret;
         }
-        link_timeout() = default;
-
-
-        template<typename duration_t>
-            requires seele::meta::is_specialization_of_v<std::decay_t<duration_t>, std::chrono::duration>
-        link_timeout(io_awaiter_t&& awaiter, duration_t&& duration) : 
-            ts(std::chrono::duration_cast<std::chrono::seconds>(duration).count(),
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                duration - std::chrono::seconds(ts.tv_sec)).count()),
-            awaiter(std::forward<io_awaiter_t>(awaiter)){}
-
     };
-
-    template<typename io_awaiter_t, typename duration_t>
-    link_timeout(io_awaiter_t&&, duration_t&&) -> link_timeout<std::decay_t<io_awaiter_t>>;
 
 
     template<typename function_t, typename... args_t>

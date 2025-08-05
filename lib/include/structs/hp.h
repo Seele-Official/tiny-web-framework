@@ -75,8 +75,6 @@ private:
         ~tls_map_t();
     };
 
-    static thread_local tls_map_t tls_map;
-
     hazard_record_t* allocate_record();
     void deallocate_record(hazard_record_t* record);
 

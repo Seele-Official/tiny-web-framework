@@ -65,7 +65,6 @@ private:
     hazard_record_t* local_tls();
     
 
-    static thread_local tls_map_t tls_map;
 
     std::array<hazard_record_t, mpsc_hp::max_thread_count> records;
     std::list<retired_ptr_t> retired;

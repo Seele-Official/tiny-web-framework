@@ -28,14 +28,16 @@ namespace coro_io {
 void ctx::worker(std::stop_token st){
 
     size_t submit_count = 0;
+    size_t pending_req_count = 0;
     while (!st.stop_requested()) {
 
         if (unp_sem.try_acquire_for(25ms)) {
             auto req = unprocessed_requests.pop_front();
             auto& [helper_ptr, ring_handle] = req.value();
             submit_count += ring_handle(helper_ptr, &ring);
-            this->pending_req_count.fetch_add(1, std::memory_order_release);
 
+            pending_req_count++;
+            
             if (submit_count >= submit_threshold) {
                 auto submit_ret = io_uring_submit(&ring);
                 if (submit_ret < 0) {
@@ -47,30 +49,33 @@ void ctx::worker(std::stop_token st){
             }
         } else {
             if (submit_count) {
+                this->pending_req_count.fetch_add(pending_req_count, std::memory_order_acq_rel);
                 auto submit_ret = io_uring_submit(&ring);
                 if (submit_ret < 0) {
                     log::async().error("io_uring_submit failed: {}", strerror(-submit_ret));
                 } else {
                     log::async().debug("Submitted {} requests to io_uring", submit_ret);
                     submit_count = 0;
+                    pending_req_count = 0;
                 }
             }
         }
     }
+    this->pending_req_count.fetch_add(pending_req_count, std::memory_order_acq_rel);
     this->is_worker_running.store(false, std::memory_order_release);
 }
 
 
 void ctx::handle_cqes(io_uring_cqe* cqe) {
     int head, count = 0;
-    
+    size_t processed_req = 0;
     io_uring_for_each_cqe(&ring, head, cqe) {
         count++;
         auto* data = std::bit_cast<usr_data*>(cqe->user_data);
         std::visit(
             [&]<typename T>(T& usr_data) {
                 if constexpr (std::is_same_v<T, io_usr_data>) {
-                    *usr_data.io_ret = cqe->res; // Copy the cqe result to the user data
+                    usr_data.io_ret->store(cqe->res, std::memory_order_release); // Copy the cqe result to the user data
                     coro::thread::dispatch(usr_data.handle);
                     this->pending_req_count.fetch_sub(1, std::memory_order_release);
                 } else if constexpr (std::is_same_v<T, timeout_usr_data>) {
@@ -94,6 +99,7 @@ void ctx::handle_cqes(io_uring_cqe* cqe) {
         this->usr_data_pool.deallocate(data); // Clean up the user data
     }
     io_uring_cq_advance(&ring, count);
+    this->pending_req_count.fetch_sub(processed_req, std::memory_order_acq_rel);
     log::async().debug("Processed {} completed requests", count);      
 }
 
@@ -126,12 +132,15 @@ void ctx::clean_up() {
     }
 
     // Clean up remaining requests
+
+    size_t pending_req_count = 0;
     while (unp_sem.try_acquire_for(5ms)) {
         auto req = unprocessed_requests.pop_front();
         auto& [helper_ptr, ring_handle] = req.value();
         ring_handle(helper_ptr, &ring);
-        this->pending_req_count.fetch_add(1, std::memory_order_release);
+        pending_req_count++;
     }
+    this->pending_req_count.fetch_add(pending_req_count, std::memory_order_acq_rel);
     auto submit_ret = io_uring_submit(&ring);
     if (submit_ret < 0) {
         log::async().error("io_uring_submit failed: {}", strerror(-submit_ret));
@@ -144,8 +153,8 @@ void ctx::clean_up() {
     __kernel_timespec ts{ .tv_sec = 1, .tv_nsec = 0 };
 
 
-    while (this->pending_req_count.load() > 0) {
-        std::println("Waiting for {} pending requests to complete...", this->pending_req_count.load());
+    while (this->pending_req_count.load(std::memory_order_relaxed) > 0) {
+        std::println("Waiting for {} pending requests to complete...", this->pending_req_count.load(std::memory_order_relaxed));
         io_uring_cqe* cqe;
         int ret = io_uring_wait_cqes(&ring, &cqe, 1, &ts, nullptr); 
 

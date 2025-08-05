@@ -472,6 +472,7 @@ void app::run(){
         for (auto& fd : web::env::accepter_fd_list) {
             web::cancel(fd.get());
         }
+        std::atomic_thread_fence(std::memory_order_seq_cst);
         coro_io::ctx::get_instance().request_stop(); 
     });
     coro_io::ctx::get_instance().run();
