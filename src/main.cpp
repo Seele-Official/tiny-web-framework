@@ -104,7 +104,7 @@ int main(int argc, char* argv[]) {
     }
     tiny_get_app tiny_app;
     
-    app().GET("/tiny_app", tiny_app);
+    app().GET("/tiny_app.so", tiny_app);
 
     app().run();
     return 0;

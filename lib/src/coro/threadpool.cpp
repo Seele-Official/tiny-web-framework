@@ -2,13 +2,13 @@
 
 namespace seele::coro::thread {
 
-thread_pool_impl& thread_pool_impl::get_instance(){
-    static thread_pool_impl instance{5};
+pool& pool::get_instance(){
+    static pool instance{5};
     return instance;
 } 
 
 
-void thread_pool_impl::worker(std::stop_token st){
+void pool::worker(std::stop_token st){
     while(sem.acquire(), !st.stop_requested()){
         
         auto h = tasks.pop_front();
@@ -16,7 +16,7 @@ void thread_pool_impl::worker(std::stop_token st){
         h->resume();
     }
 }
-thread_pool_impl::thread_pool_impl(size_t worker_count) : sem{0} {
+pool::pool(size_t worker_count) : sem{0} {
     workers.reserve(worker_count);
     for(size_t i = 0; i < worker_count; ++i){
         workers.emplace_back([this](std::stop_token st){
@@ -25,7 +25,7 @@ thread_pool_impl::thread_pool_impl(size_t worker_count) : sem{0} {
     }
 }
 
-thread_pool_impl::~thread_pool_impl() {
+pool::~pool() {
     for (auto& worker : workers) {
         worker.request_stop();
     }

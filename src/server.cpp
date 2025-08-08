@@ -448,7 +448,7 @@ void app::run(){
         std::println("Server address is not valid");
         std::terminate();
     }
-    constexpr size_t accepter_count = 8;
+    constexpr size_t accepter_count = 32;
     constexpr size_t max_accepter_connections = 256;
     web::env::accepter_fd_list.reserve(accepter_count);
     for (size_t i = 0; i < accepter_count; ++i) {

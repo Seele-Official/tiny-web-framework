@@ -10,25 +10,25 @@
 namespace seele::coro::thread {
     
 
-class thread_pool_impl{
+class pool{
 public:
-    static thread_pool_impl& get_instance();
+    static pool& get_instance();
 
     auto submit(std::coroutine_handle<> h){
         tasks.emplace_back(h);
         sem.release();
     }
 
-    thread_pool_impl(const thread_pool_impl&) = delete;        
-    thread_pool_impl(thread_pool_impl&&) = delete;
-    thread_pool_impl& operator=(const thread_pool_impl&) = delete;
-    thread_pool_impl& operator=(thread_pool_impl&&) = delete;
+    pool(const pool&) = delete;        
+    pool(pool&&) = delete;
+    pool& operator=(const pool&) = delete;
+    pool& operator=(pool&&) = delete;
 private:        
 
     void worker(std::stop_token st);
 
-    thread_pool_impl(size_t worker_count);        
-    ~thread_pool_impl();  
+    pool(size_t worker_count);        
+    ~pool();  
 
     structs::msc_queue<std::coroutine_handle<>> tasks;        
     std::vector<std::jthread> workers;
@@ -36,7 +36,7 @@ private:
 };
 
 inline auto dispatch(std::coroutine_handle<> handle) {
-    thread_pool_impl::get_instance().submit(handle);
+    pool::get_instance().submit(handle);
 }    
 
 struct dispatch_awaiter{

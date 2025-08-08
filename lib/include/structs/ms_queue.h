@@ -32,9 +32,6 @@ public:
     
     std::optional<T> pop_front();
 
-    std::optional<T> front();
-    bool is_empty() const;
-
 private:
     alignas(64) std::atomic<node_t*> head;
     alignas(64) std::atomic<node_t*> tail;
@@ -139,16 +136,6 @@ std::optional<T> ms_queue<T>::pop_front() {
             return value;
         }
     }
-}
-
-template <typename T>
-std::optional<T> ms_queue<T>::front() {
-        node_t* dummy = this->head.load(std::memory_order_acquire);
-        node_t* next = dummy->next.load(std::memory_order_acquire);
-        if (next == nullptr) {
-            return std::nullopt;
-        }
-        return std::make_optional<T>(next->data);
 }
 
 }

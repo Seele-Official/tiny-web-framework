@@ -166,34 +166,24 @@ struct app{
 };
 
 template<typename invocable_t>
-    requires std::is_invocable_r_v<web::handler_response, invocable_t, const http::query_t&, const http::header_t&>
+    requires std::is_invocable_r_v<web::handler_response, invocable_t, const http::query_t&, const http::header_t&> 
 app& app::GET(std::string_view path, invocable_t& handler){
-    using type = std::decay_t<invocable_t>;
-    if constexpr (std::is_same_v<type, auto (*)(const http::query_t&, const http::header_t&) -> web::handler_response>) {
-        return GET(path, nullptr, handler);
-    } else {
-        return GET(path, &handler, [](void* helper_ptr, const http::query_t& query, const http::header_t& header) -> web::handler_response {
-            constexpr auto (type::*func)(const http::query_t&, const http::header_t&) -> web::handler_response = &type::operator();
+    static_assert(!std::is_function_v<invocable_t>, "Handler cannot be a function, use a lambda or a functor instead.");
 
-            return (static_cast<invocable_t*>(helper_ptr)->*func)(query, header);
-        });
-    }
+    return GET(path, &handler, [](void* helper_ptr, const http::query_t& query, const http::header_t& header) -> web::handler_response {
+        return static_cast<invocable_t*>(helper_ptr)->operator()(query, header);
+    });
 
 }
 
 template<typename invocable_t>
     requires std::is_invocable_r_v<web::handler_response, invocable_t, const http::query_t&, const http::header_t&, const http::body_t&>
 app& app::POST(std::string_view path, invocable_t& handler){
-    using type = std::decay_t<invocable_t>;
-    if constexpr (std::is_same_v<type, auto (*)(const http::query_t&, const http::header_t&, const http::body_t&) -> web::handler_response>) {
-        return POST(path, nullptr, handler);
-    } else {
-        return POST(path, &handler, [](void* helper_ptr, const http::query_t& query, const http::header_t& header, const http::body_t& body) -> web::handler_response {
-            constexpr auto (type::*func)(const http::query_t&, const http::header_t&, const http::body_t&) -> web::handler_response = &type::operator();
+    static_assert(!std::is_function_v<invocable_t>, "Handler cannot be a function, use a lambda or a functor instead.");
 
-            return (static_cast<invocable_t*>(helper_ptr)->*func)(query, header, body);
-        });
-    }
+    return POST(path, &handler, [](void* helper_ptr, const http::query_t& query, const http::header_t& header, const http::body_t& body) -> web::handler_response {
+        return static_cast<invocable_t*>(helper_ptr)->operator()(query, header, body);
+    });
 
 }
 
