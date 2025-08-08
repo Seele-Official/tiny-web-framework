@@ -2,20 +2,18 @@
 
 ## Introduction
 
-The Tiny Webserver is a lightweight, high-performance server built with modern C++23. It leverages advanced C++ features to deliver an efficient and robust solution for handling web requests. With its focus on performance, the server implements asynchronous operations using coroutines, ensuring non-blocking I/O and high scalability.
+一个简易 webserver。
 
 ## Features
 
-- **Modern C++23:** Utilizes new language features such as coroutines for asynchronous operations and advanced template meta-programming for compile-time optimizations.
-- **Proactor Pattern:** Handles asynchronous I/O operations efficiently using the proactor design, implemented with [liburing](https://github.com/axboe/liburing).
-- **Lock-Free Structures:** Employs lock-free data structures to reduce contention and improve concurrency.
-- **Thread Pool:** Manages multiple threads to handle workloads concurrently, ensuring smooth performance under high load.
+- **C++23:** 
+- **Proactor Pattern:**
 
 ## Requirements
 
-- A C++23 compliant compiler (e.g., GCC 14+).
-- [liburing](https://github.com/axboe/liburing) for asynchronous I/O operations.
-- CMake.
+- GCC 14+
+- [liburing](https://github.com/axboe/liburing)
+- CMake
 
 ## Installation and Build
 
@@ -34,10 +32,43 @@ The Tiny Webserver is a lightweight, high-performance server built with modern C
 
 ## Usage
 
-After building, you can run the server:
+搭建一个简易 GET 服务
 
-```sh
-./web_server -a 127.0.0.1:8080 -p /home/seele/webserver/static
+```cpp
+#include <print>
+#include "http.h"
+#include "log.h"
+#include "server.h"
+using namespace seele;
+
+int main() {
+    log::logger().set_output_file("web_server.log");
+    auto tiny_app = [](const http::query_t& query, const http::header_t& header) -> web::handler_response {
+        std::println("Received GET request for /tiny_app with query: {}", query);
+        if (query != "hello!"){
+            return web::send_http_error(http::status_code::bad_request);
+        }
+        std::println("Headers:");
+        for (const auto& [key, value] : header) {
+            std::println("  {}: {}", key, value);
+        }
+
+        return web::send_msg(
+            {
+                http::status_code::ok,
+                {
+                    {"Content-Type", "text/plain; charset=utf-8"}
+                },
+                "Hello from tiny_get_app!"
+            }
+        );
+    };
+
+
+    app().set_addr("127.0.0.1:80")
+        .set_root_path("/home/seele/webserver/static")
+        .GET("/tiny_app.so", tiny_app)
+        .run();
+    return 0;
+}
 ```
-
-The server will listen for HTTP requests on the specified port.
