@@ -43,7 +43,7 @@ using namespace seele;
 
 int main() {
     log::logger().set_output_file("web_server.log");
-    auto tiny_app = [](const http::query_t& query, const http::header_t& header) -> web::handler_response {
+    auto tiny_app = [](const http::query_t& query, const http::header_t& header) {
         std::println("Received GET request for /tiny_app with query: {}", query);
         if (query != "hello!"){
             return web::send_http_error(http::status_code::bad_request);

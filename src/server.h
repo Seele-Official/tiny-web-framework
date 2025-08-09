@@ -129,17 +129,17 @@ private:
     handle_type handle;
 };
 
-struct handler_response{
-    send_task task;
+struct task{
+    send_task t;
     auto await(int fd, seele::net::ipv4 client_addr, std::chrono::milliseconds timeout){
-        return task.await(fd, client_addr, timeout);
+        return t.await(fd, client_addr, timeout);
     }
-    handler_response(send_task&& t): task(std::move(t)){}
+    task(send_task&& t): t(std::move(t)){}
 };
 
-send_task send_http_error(http::status_code code);
-send_task send_file(http_file_ctx&& ctx);
-send_task send_msg(const http::res_msg& msg);
+task send_http_error(http::status_code code);
+task send_file(http_file_ctx&& ctx);
+task send_msg(const http::res_msg& msg);
 
 } // namespace web
 
@@ -151,37 +151,37 @@ struct app{
     app& set_addr(std::string_view addr_str);
 
     template<typename invocable_t>
-        requires std::is_invocable_r_v<web::handler_response, invocable_t, const http::query_t&, const http::header_t&>
+        requires std::is_invocable_r_v<web::task, invocable_t, const http::query_t&, const http::header_t&>
     app& GET(std::string_view path, invocable_t& handler);
 
-    app& GET(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&) -> web::handler_response);
+    app& GET(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&) -> web::task);
 
     template<typename invocable_t>
-        requires std::is_invocable_r_v<web::handler_response, invocable_t, const http::query_t&, const http::header_t&, const http::body_t&>
+        requires std::is_invocable_r_v<web::task, invocable_t, const http::query_t&, const http::header_t&, const http::body_t&>
     app& POST(std::string_view path, invocable_t& handler);
 
-    app& POST(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&, const http::body_t&) -> web::handler_response);
+    app& POST(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&, const http::body_t&) -> web::task);
 
     void run();
 };
 
 template<typename invocable_t>
-    requires std::is_invocable_r_v<web::handler_response, invocable_t, const http::query_t&, const http::header_t&> 
+    requires std::is_invocable_r_v<web::task, invocable_t, const http::query_t&, const http::header_t&> 
 app& app::GET(std::string_view path, invocable_t& handler){
     static_assert(!std::is_function_v<invocable_t>, "Handler cannot be a function, use a lambda or a functor instead.");
 
-    return GET(path, &handler, [](void* helper_ptr, const http::query_t& query, const http::header_t& header) -> web::handler_response {
+    return GET(path, &handler, [](void* helper_ptr, const http::query_t& query, const http::header_t& header) -> web::task {
         return static_cast<invocable_t*>(helper_ptr)->operator()(query, header);
     });
 
 }
 
 template<typename invocable_t>
-    requires std::is_invocable_r_v<web::handler_response, invocable_t, const http::query_t&, const http::header_t&, const http::body_t&>
+    requires std::is_invocable_r_v<web::task, invocable_t, const http::query_t&, const http::header_t&, const http::body_t&>
 app& app::POST(std::string_view path, invocable_t& handler){
     static_assert(!std::is_function_v<invocable_t>, "Handler cannot be a function, use a lambda or a functor instead.");
 
-    return POST(path, &handler, [](void* helper_ptr, const http::query_t& query, const http::header_t& header, const http::body_t& body) -> web::handler_response {
+    return POST(path, &handler, [](void* helper_ptr, const http::query_t& query, const http::header_t& header, const http::body_t& body) -> web::task {
         return static_cast<invocable_t*>(helper_ptr)->operator()(query, header, body);
     });
 

@@ -63,18 +63,18 @@ namespace env {
 
     struct GET_handler {
         void* helper_ptr;
-        auto (*handler)(void*, const http::query_t&, const http::header_t&) -> handler_response;
+        auto (*handler)(void*, const http::query_t&, const http::header_t&) -> task;
 
-        inline handler_response operator()(const http::query_t& query, const http::header_t& header) {
+        inline task operator()(const http::query_t& query, const http::header_t& header) {
             return handler(helper_ptr, query, header);
         }
     };
 
     struct POST_handler {
         void* helper_ptr;
-        auto (*handler)(void*, const http::query_t&, const http::header_t&, const http::body_t&) -> handler_response;
+        auto (*handler)(void*, const http::query_t&, const http::header_t&, const http::body_t&) -> task;
 
-        inline handler_response operator()(const http::query_t& query, const http::header_t& header, const http::body_t& body) {
+        inline task operator()(const http::query_t& query, const http::header_t& header, const http::body_t& body) {
             return handler(helper_ptr, query, header, body);
         }
     };
@@ -95,70 +95,54 @@ struct wait_promise_init{
 };
 
 
-send_task send_http_error(http::status_code code){
-    auto content = http::error_contents[code];
-    http_file_ctx ctx = http_file_ctx::make(
-        {
-            code,
+task send_http_error(http::status_code code){
+    return [](http::status_code code) -> send_task {
+        auto content = http::error_contents[code];
+        http_file_ctx ctx = http_file_ctx::make(
             {
-                {"Content-Type", "text/html; charset=utf-8"},
-                {"X-Content-Type-Options", "nosniff"},
-            }
-        },
-        (void*) content.data(),
-        content.size()
-    );
-    auto promise = co_await wait_promise_init{};
-    auto fd = promise->fd;
-    co_await coro_io::awaiter::link_timeout{
-        coro_io::awaiter::writev{fd, &ctx.header, 2},
-        200ms
-    };
+                code,
+                {
+                    {"Content-Type", "text/html; charset=utf-8"},
+                    {"X-Content-Type-Options", "nosniff"},
+                }
+            },
+            (void*) content.data(),
+            content.size()
+        );
+        auto promise = co_await wait_promise_init{};
+        auto fd = promise->fd;
+        co_await coro_io::awaiter::link_timeout{
+            coro_io::awaiter::writev{fd, &ctx.header, 2},
+            200ms
+        };
 
-    co_return -1;
+        co_return -1;
+    }(code);
 }
 
-send_task send_file(http_file_ctx&& ctx){
-    auto file_ctx = std::move(ctx);
+task send_file(http_file_ctx&& ctx){
+    return [](http_file_ctx&& ctx) -> send_task {
+        auto file_ctx = std::move(ctx);
 
-    auto promise = co_await wait_promise_init{};
+        auto promise = co_await wait_promise_init{};
 
-    auto fd = promise->fd;
-    auto client_addr = promise->client_addr;
-    auto timeout = promise->timeout;
+        auto fd = promise->fd;
+        auto client_addr = promise->client_addr;
+        auto timeout = promise->timeout;
 
 
 
-    uint32_t total_size = file_ctx.size();
-    uint32_t sent_size = 0;
-    int32_t res = co_await coro_io::awaiter::link_timeout{
-        coro_io::awaiter::writev{
-            fd,
-            &file_ctx.header,
-            2
-        },
-        timeout
-    };
-
-    if (res <= 0) {
-        log::async().error(
-            "Failed to send response header for {} : {}", 
-            client_addr.toString(), coro_io::error::msg
-        );
-        co_return -1;
-    }
-    sent_size += res;
-
-    while (sent_size < total_size) {
-        auto offset = file_ctx.offset_of(sent_size);
-        res = co_await coro_io::awaiter::link_timeout{
+        uint32_t total_size = file_ctx.size();
+        uint32_t sent_size = 0;
+        int32_t res = co_await coro_io::awaiter::link_timeout{
             coro_io::awaiter::writev{
                 fd,
-                &offset,
-                1
+                &file_ctx.header,
+                2
             },
             timeout
         };
+
         if (res <= 0) {
             log::async().error(
                 "Failed to send response header for {} : {}", 
@@ -167,49 +151,72 @@ send_task send_file(http_file_ctx&& ctx){
             co_return -1;
         }
         sent_size += res;
-    }
-    co_return sent_size;
-}
 
-send_task send_msg(const http::res_msg& msg){
-    
-    std::string str = msg.to_string();
-
-    auto promise = co_await wait_promise_init{};
-
-    auto fd = promise->fd;
-    auto client_addr = promise->client_addr;
-    auto timeout = promise->timeout;
-
-    
-    uint32_t total_size = static_cast<uint32_t>(str.size());
-    uint32_t sent_size = 0;
-    while (sent_size < total_size) {
-        auto offset = str.data() + sent_size;
-        auto remaining_size = total_size - sent_size;
-        int32_t res = co_await coro_io::awaiter::link_timeout{
-            coro_io::awaiter::write{
-                fd,
-                offset,
-                remaining_size
-            },
-            timeout
-        };
-        if (res <= 0) {
-            log::async().error(
-                "Failed to send response header for {} : {}", 
-                client_addr.toString(), coro_io::error::msg
-            );
-            co_return -1;
+        while (sent_size < total_size) {
+            auto offset = file_ctx.offset_of(sent_size);
+            res = co_await coro_io::awaiter::link_timeout{
+                coro_io::awaiter::writev{
+                    fd,
+                    &offset,
+                    1
+                },
+                timeout
+            };
+            if (res <= 0) {
+                log::async().error(
+                    "Failed to send response header for {} : {}", 
+                    client_addr.toString(), coro_io::error::msg
+                );
+                co_return -1;
+            }
+            sent_size += res;
         }
-        sent_size += res;
-    }
-    co_return sent_size;
+        co_return sent_size;
+    }(std::move(ctx));
+}
+
+task send_msg(const http::res_msg& msg){
+    
+    return [](const http::res_msg& msg) -> send_task {
+        std::string str = msg.to_string();
+
+        auto promise = co_await wait_promise_init{};
+
+        auto fd = promise->fd;
+        auto client_addr = promise->client_addr;
+        auto timeout = promise->timeout;
+
+        
+        uint32_t total_size = static_cast<uint32_t>(str.size());
+        uint32_t sent_size = 0;
+        while (sent_size < total_size) {
+            auto offset = str.data() + sent_size;
+            auto remaining_size = total_size - sent_size;
+            int32_t res = co_await coro_io::awaiter::link_timeout{
+                coro_io::awaiter::write{
+                    fd,
+                    offset,
+                    remaining_size
+                },
+                timeout
+            };
+            if (res <= 0) {
+                log::async().error(
+                    "Failed to send response header for {} : {}", 
+                    client_addr.toString(), coro_io::error::msg
+                );
+                co_return -1;
+            }
+            sent_size += res;
+        }
+        co_return sent_size;
+    }(msg);
+
 }
 
 
 
-handler_response handle_file_get(const http::req_msg& req){
+task handle_file_get(const http::req_msg& req){
     auto origin = std::get_if<http::origin_form>(&req.line.target);
     if (!origin) {
         return send_http_error(http::status_code::not_implemented);
@@ -259,7 +266,7 @@ handler_response handle_file_get(const http::req_msg& req){
 
 
 
-handler_response handle_req(const http::req_msg& req){
+task handle_req(const http::req_msg& req){
     switch (req.line.method) {
         case http::method_t::GET: {
             if (auto origin = std::get_if<http::origin_form>(&req.line.target)) {
@@ -288,7 +295,7 @@ handler_response handle_req(const http::req_msg& req){
 
 
 
-coro::task async_handle_connection(int fd, net::ipv4 addr) {
+coro::simple_task async_handle_connection(int fd, net::ipv4 addr) {
     fd_wrapper fd_w(fd);
     net::ipv4 client_addr = addr;
     co_await coro::thread::dispatch_awaiter{};
@@ -346,7 +353,7 @@ coro::task async_handle_connection(int fd, net::ipv4 addr) {
 
 
 
-coro::task server_loop(int32_t _fd) {
+coro::simple_task server_loop(int32_t _fd) {
     int32_t fd = _fd;
     co_await coro::thread::dispatch_awaiter{};
     while(true){
@@ -375,7 +382,7 @@ coro::task server_loop(int32_t _fd) {
     co_return;
 }
 
-coro::task cancel(int32_t fd) {
+coro::simple_task cancel(int32_t fd) {
     if (co_await coro_io::awaiter::cancel_fd{fd} != 0){
         std::println("Failed to cancel fd: {}", fd);
     }
@@ -432,12 +439,12 @@ struct app& app::set_addr(std::string_view addr_str) {
     return *this;
 }
 
-struct app& app::GET(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&) -> web::handler_response) {
+struct app& app::GET(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&) -> web::task) {
     web::env::get_routings.emplace(std::string(path), web::env::GET_handler{helper_ptr, handler});
     return *this;
 }
 
-struct app& app::POST(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&, const http::body_t&) -> web::handler_response){
+struct app& app::POST(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&, const http::body_t&) -> web::task){
     web::env::post_routings.emplace(std::string(path), web::env::POST_handler{helper_ptr, handler});
     return *this;
 }

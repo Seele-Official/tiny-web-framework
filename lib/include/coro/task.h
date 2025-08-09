@@ -5,10 +5,10 @@
 
 namespace seele::coro{
 // final_suspend suspend_never , so automatically destroyed
-class task{
+class simple_task{
 public:
     struct promise_type{
-        task get_return_object(){
+        simple_task get_return_object(){
             return {};
         }
 
