@@ -1,14 +1,8 @@
 #pragma once
-#include <bits/types/struct_iovec.h>
-#include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <expected>
-#include <optional>
 #include <string_view>
 #include <type_traits>
-#include <unordered_map>
-#include <variant>
 #include "http.h"
 #include "io.h"
 #include "meta.h"

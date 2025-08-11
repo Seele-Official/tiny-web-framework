@@ -118,7 +118,7 @@ namespace coro_io::awaiter {
                     }
                 )
             );
-            return 1;
+            return 1; // return the number of sqe written
         }
 
         void setup(io_uring_sqe* sqe) { std::terminate();} // Default setup, can be overridden by derived classes
