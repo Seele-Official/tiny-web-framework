@@ -7,10 +7,10 @@ namespace seele::structs {
 mpsc_hazard_manager::~mpsc_hazard_manager() {            
     this->scan_retired();
     if (this->retired.size() > 0) {
-        log::sync().error("Hazard manager still has {} retired pointers after destruction.", this->retired.size());
+        log::sync::error("Hazard manager still has {} retired pointers after destruction.", this->retired.size());
         for (const auto& [index, record] : std::views::enumerate(this->records)) {
             if (record.active.load(std::memory_order_acquire)) {
-                log::sync().error("Hazard record {} is still active.", index);
+                log::sync::error("Hazard record {} is still active.", index);
             }
         }
 
@@ -73,7 +73,7 @@ void mpsc_hazard_manager::scan_retired(){
             deleter(ptr);
             return true; // Remove from the list
         }
-        log::sync().error("retired pointer has no deleter.");
+        log::sync::error("retired pointer has no deleter.");
         std::terminate();
     });
 }

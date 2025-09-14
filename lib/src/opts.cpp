@@ -53,7 +53,7 @@ std::generator<parse_result> parse(std::span<const ruler> rs, int argc, char** a
         }
     }
 
-    co_yield pos_arg{std::move(args)};
+    if (!args.empty()) co_yield pos_arg{std::move(args)};
 }
 
 }

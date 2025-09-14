@@ -139,7 +139,7 @@ task send_file(http_file_ctx&& ctx){
         };
 
         if (res <= 0) {
-            log::async().error(
+            log::async::error(
                 "Failed to send response header for {} : {}", 
                 client_addr.toString(), coro_io::error::msg
             );
@@ -158,7 +158,7 @@ task send_file(http_file_ctx&& ctx){
                 timeout
             };
             if (res <= 0) {
-                log::async().error(
+                log::async::error(
                     "Failed to send response header for {} : {}", 
                     client_addr.toString(), coro_io::error::msg
                 );
@@ -196,7 +196,7 @@ task send_msg(const http::res_msg& msg){
                 timeout
             };
             if (res <= 0) {
-                log::async().error(
+                log::async::error(
                     "Failed to send response header for {} : {}", 
                     client_addr.toString(), coro_io::error::msg
                 );
@@ -223,7 +223,7 @@ task handle_file_get(const http::req_msg& req){
     std::filesystem::path rel = full_path.lexically_relative(env::root_path);
 
     if (rel.empty() || *rel.begin() == ".."){
-        log::async().error("Attempted to access outside of root path: {}", full_path.string());
+        log::async::error("Attempted to access outside of root path: {}", full_path.string());
         return send_http_error(http::status_code::forbidden);
     }
 
@@ -312,7 +312,7 @@ coro::simple_task async_handle_connection(int fd, net::ipv4 addr) {
             };
 
             if (auto bytes_read = res; bytes_read <= 0) {
-                log::async().error("Failed to read from {}: {}", 
+                log::async::error("Failed to read from {}: {}", 
                     client_addr.toString(), coro_io::error::msg
                 );
                 co_return;
@@ -329,7 +329,7 @@ coro::simple_task async_handle_connection(int fd, net::ipv4 addr) {
                 if (it->second == "close") {
                     co_return; // Close connection immediately
                 } else if (it->second == "keep-alive") {
-                    timeout = 10000ms; // Keep-alive timeout
+                    timeout = 1000ms; // Keep-alive timeout
                 }
             }
 
@@ -338,7 +338,7 @@ coro::simple_task async_handle_connection(int fd, net::ipv4 addr) {
             }
 
         } else {
-            log::async().error("Failed to parse request from {}", client_addr.toString());
+            log::async::error("Failed to parse request from {}", client_addr.toString());
             co_await send_http_error(http::status_code::bad_request).await(fd_w.get(), client_addr, timeout);
             co_return;
         }
@@ -360,17 +360,17 @@ coro::simple_task server_loop(int32_t _fd) {
         switch (ret) {
             case coro_io::error::SYS:
             case coro_io::error::CTX_CLOSED:
-                log::async().error("Failed to accept connection: {}", coro_io::error::msg);
+                log::async::error("Failed to accept connection: {}", coro_io::error::msg);
                 co_return;
             case coro_io::error::TIMEOUT:
-                log::async().debug("Accept timed out, retrying...");
+                log::async::debug("Accept timed out, retrying...");
                 continue;
             default:
                 break;
         
         }
         auto ipv4_addr = net::ipv4::from_sockaddr_in(client_addr);
-        log::async().info("Fd[{}]: Accepted connection from {}", fd, ipv4_addr.toString());
+        log::async::info("Fd[{}]: Accepted connection from {}", fd, ipv4_addr.toString());
         async_handle_connection(ret, ipv4_addr);
     }
 
@@ -392,7 +392,7 @@ struct app& app::set_root_path(std::string_view path) {
     for (const auto& entry : std::filesystem::recursive_directory_iterator(web::env::root_path)) {
         if (entry.is_regular_file()) {
             auto full_path = std::filesystem::absolute(entry.path());
-            log::sync().info("Adding file to cache: {}", full_path.string());
+            log::sync::info("Adding file to cache: {}", full_path.string());
 
             fd_wrapper file_fd_w(open(full_path.c_str(), O_RDONLY));
             if (!file_fd_w.is_valid()) {

@@ -80,7 +80,7 @@ void hazard_manager::scan_retired(std::list<retired_ptr_t>& retired_list){
             deleter(ptr);
             return true; // Remove from the list
         }
-        log::sync().error("retired pointer has no deleter.");
+        log::sync::error("retired pointer has no deleter.");
         std::terminate();
     });
 }
@@ -119,10 +119,10 @@ hazard_manager::~hazard_manager() {
 
     this->scan_retired(g_retired);
     if (g_retired.size() > 0) {
-        log::sync().error("Hazard manager still has {} retired pointers after destruction.", g_retired.size());
+        log::sync::error("Hazard manager still has {} retired pointers after destruction.", g_retired.size());
         for (const auto& [index, record] : std::views::enumerate(this->records)) {
             if (record.active.load(std::memory_order_acquire)) {
-                log::sync().error("Hazard record {} is still active.", index);
+                log::sync::error("Hazard record {} is still active.", index);
             }
         }
 

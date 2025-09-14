@@ -11,12 +11,11 @@
 #include <utility>
 #include <chrono>
 #include <format>
-#include "coro/async.h"
 #include "meta.h"
 namespace seele::log{
+
 using clock = std::chrono::system_clock;
 using soc_loc = std::source_location;
-constexpr size_t log_level = 1;
 
 enum class level {
     error,
@@ -25,19 +24,41 @@ enum class level {
     debug,
     trace
 };
+constexpr size_t log_level = 1;
 
-class logger_impl {
+template <typename... args_t>
+struct basic_format_string_wrapper {
+    template<typename T>
+	    requires std::convertible_to<const T&, std::string_view>
+	consteval basic_format_string_wrapper(const T& s, 
+                         soc_loc loc = soc_loc::current()) : fmt(s), loc(loc) {}
+    std::format_string<args_t...> fmt;
+    soc_loc loc;
+};
+
+template <typename... args_t>
+using format_string_wrapper = basic_format_string_wrapper<std::type_identity_t<args_t>...>;
+
+namespace sync {
+    template<level lvl, typename... args_t>
+    void log(format_string_wrapper<args_t...>, args_t&&...);
+}
+
+namespace detail{
+
+class logger {
 public:
-    friend class async;
-    friend class sync;
-    logger_impl(const logger_impl&) = delete;        
-    logger_impl(logger_impl&&) = delete;
-    logger_impl& operator=(const logger_impl&) = delete;
-    logger_impl& operator=(logger_impl&&) = delete;
+    template<level lvl, typename... args_t>
+    friend void sync::log(format_string_wrapper<args_t...> fmt_w, args_t&&... args);
+
+    logger(const logger&) = delete;        
+    logger(logger&&) = delete;
+    logger& operator=(const logger&) = delete;
+    logger& operator=(logger&&) = delete;
 
 
-    inline static logger_impl& get_instance() {
-        static logger_impl inst;
+    inline static logger& get_instance() {
+        static logger inst;
         return inst;
     }
 
@@ -47,8 +68,11 @@ public:
 
     inline void set_output_file(std::string_view filename) {
         this->output = new std::ofstream{filename.data(), std::ios::app};
-    }
-private:
+    }    
+    
+
+
+private:    
     template<typename... args_t>
     void log(
         level level,
@@ -56,10 +80,10 @@ private:
         std::chrono::system_clock::time_point time,
         std::format_string<args_t...> fmt,
         args_t&&... args
-    );      
+    );
 
-    inline explicit logger_impl() : output{&std::cout} {}
-    inline ~logger_impl() {
+    inline explicit logger() : output{&std::cout} {}
+    inline ~logger() {
         if (output != &std::cout) {
             delete output;
         }
@@ -69,12 +93,8 @@ private:
     std::ostream* output;        
 };
 
-inline auto& logger() {
-    return logger_impl::get_instance();
-}
-
 template<typename... args_t>
-void logger_impl::log(level lvl, soc_loc loc, clock::time_point time, std::format_string<args_t...> fmt, args_t&&... args){
+void logger::log(level lvl, soc_loc loc, clock::time_point time, std::format_string<args_t...> fmt, args_t&&... args){
     static auto lvl_map = seele::meta::enum_name_table<level>();
     if constexpr (log_level == 0){
         return; // No logging
@@ -115,132 +135,54 @@ void logger_impl::log(level lvl, soc_loc loc, clock::time_point time, std::forma
                 )
             );                
         }
-
-
-                    
     }
 
 }
+};
 
-struct sync{
-    soc_loc loc;
-    clock::time_point now;
-    sync(soc_loc loc = soc_loc::current(), clock::time_point now = clock::now()) : loc{loc}, now{now} {}
-    template<typename... args_t>
-    void log(level lvl, std::format_string<args_t...> fmt, args_t&&... args){
+
+inline auto& logger() {
+    return detail::logger::get_instance();
+}
+
+namespace sync{
+    template<level lvl, typename... args_t>
+    void log(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
+        auto [fmt, loc] = fmt_w;
         if constexpr (log_level != 0){
             logger().log(
-                lvl, loc, now, fmt, std::forward<args_t>(args)...
+                lvl, loc, clock::now(), fmt, std::forward<args_t>(args)...
             );
         }
     }
 
     template<typename... args_t>
-    void error(std::format_string<args_t...> fmt, args_t&&... args){
-        if constexpr (log_level != 0){
-            this->log(
-                level::error, fmt, std::forward<args_t>(args)...
-            );
-        }
+    void error(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
+        log<level::error>(fmt_w, std::forward<args_t>(args)...);
     }
 
     template<typename... args_t>
-    void warn(std::format_string<args_t...> fmt, args_t&&... args){
-        if constexpr (log_level != 0){
-            this->log(
-                level::warn, fmt, std::forward<args_t>(args)...
-            );
-        }
+    void warn(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
+        log<level::warn>(fmt_w, std::forward<args_t>(args)...);
     }
 
     template<typename... args_t>
-    void info(std::format_string<args_t...> fmt, args_t&&... args){
-        if constexpr (log_level != 0){
-            this->log(
-                level::info, fmt, std::forward<args_t>(args)...
-            );
-        }
+    void info(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
+        log<level::info>(fmt_w, std::forward<args_t>(args)...);
     }
 
     template<typename... args_t>
-    void debug(std::format_string<args_t...> fmt, args_t&&... args){
-        if constexpr (log_level > 1){
-            this->log(
-                level::debug, fmt, std::forward<args_t>(args)...
-            );
-        }
+    void debug(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
+        log<level::debug>(fmt_w, std::forward<args_t>(args)...);
     }
 
     template<typename... args_t>
-    void trace(std::format_string<args_t...> fmt, args_t&&... args){
-        if constexpr (log_level > 1){
-            this->log(
-                level::trace, fmt, std::forward<args_t>(args)...
-            );
-        }
+    void trace(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
+        log<level::trace>(fmt_w, std::forward<args_t>(args)...);
     }
 };
 
-struct async : sync{
-    async(soc_loc loc = soc_loc::current(), clock::time_point now = clock::now()) : sync{loc, now} {}
-
-    template<typename... args_t>
-    void log(level lvl, std::format_string<std::decay_t<args_t>&...> fmt, args_t&&... args){
-        if constexpr (log_level != 0){
-            seele::coro::async(
-                &logger_impl::log<std::decay_t<args_t>&...>,
-                std::ref(logger()), lvl, loc, now, fmt, std::forward<args_t>(args)...
-            );
-        }
-
-    }
-    template<typename... args_t>
-    void error(std::format_string<std::decay_t<args_t>&...> fmt, args_t&&... args){
-        if constexpr (log_level != 0){
-            this->log(
-                level::error, fmt, std::forward<args_t>(args)...
-            );
-        }
-    }
-
-    template<typename... args_t>
-    void warn(std::format_string<std::decay_t<args_t>&...> fmt, args_t&&... args){
-        if constexpr (log_level != 0){
-            this->log(
-                level::warn, fmt, std::forward<args_t>(args)...
-            );
-        }
-    }
-
-    template<typename... args_t>
-    void info(std::format_string<std::decay_t<args_t>&...> fmt, args_t&&... args){
-        if constexpr (log_level != 0){
-            this->log(
-                level::info, fmt, std::forward<args_t>(args)...
-            );
-        }
-    }
-
-    template<typename... args_t>
-    void debug(std::format_string<std::decay_t<args_t>&...> fmt, args_t&&... args){
-        if constexpr (log_level > 1){
-            this->log(
-                level::debug, fmt, std::forward<args_t>(args)...
-            );
-        }
-    }
-
-    template<typename... args_t>
-    void trace(std::format_string<std::decay_t<args_t>&...> fmt, args_t&&... args){
-        if constexpr (log_level > 1){
-            this->log(
-                level::trace, fmt, std::forward<args_t>(args)...
-            );
-        }
-    }
-
-};
-
+namespace async = sync;
 
 }
 
