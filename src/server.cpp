@@ -23,6 +23,7 @@
 
 #include "coro/lazy_task.h"
 #include "coro/task.h"
+#include "coro/threadpool.h"
 #include "http.h"
 #include "io.h"
 #include "log.h"
@@ -56,27 +57,8 @@ namespace env {
 
 
 
-    struct GET_handler {
-        void* helper_ptr;
-        auto (*handler)(void*, const http::query_t&, const http::header_t&) -> task;
-
-        inline task operator()(const http::query_t& query, const http::header_t& header) {
-            return handler(helper_ptr, query, header);
-        }
-    };
-
-    struct POST_handler {
-        void* helper_ptr;
-        auto (*handler)(void*, const http::query_t&, const http::header_t&, const http::body_t&) -> task;
-
-        inline task operator()(const http::query_t& query, const http::header_t& header, const http::body_t& body) {
-            return handler(helper_ptr, query, header, body);
-        }
-    };
-
-
-    static std::unordered_map<std::string, GET_handler> get_routings;
-    static std::unordered_map<std::string, POST_handler> post_routings;
+    static std::unordered_map<std::string, GET_route_handler_t> get_routings;
+    static std::unordered_map<std::string, POST_route_handler_t> post_routings;
 }
 
 struct wait_promise_init{
@@ -434,13 +416,13 @@ struct app& app::set_addr(std::string_view addr_str) {
     return *this;
 }
 
-struct app& app::GET(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&) -> web::task) {
-    web::env::get_routings.emplace(std::string(path), web::env::GET_handler{helper_ptr, handler});
+struct app& app::GET(std::string_view path, GET_route_handler_t handler) {
+    web::env::get_routings.emplace(std::string(path), handler);
     return *this;
 }
 
-struct app& app::POST(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&, const http::body_t&) -> web::task){
-    web::env::post_routings.emplace(std::string(path), web::env::POST_handler{helper_ptr, handler});
+struct app& app::POST(std::string_view path, POST_route_handler_t handler) {
+    web::env::post_routings.emplace(std::string(path), handler);
     return *this;
 }
 

@@ -137,49 +137,20 @@ task send_msg(const http::res_msg& msg);
 
 } // namespace web
 
-
+using GET_route_handler_t = seele::meta::function_ref<web::task(const http::query_t&, const http::header_t&)>;
+using POST_route_handler_t = seele::meta::function_ref<web::task(const http::query_t&, const http::header_t&, const http::body_t&)>;
 
 struct app{
     app& set_root_path(std::string_view path);
 
     app& set_addr(std::string_view addr_str);
 
-    template<typename invocable_t>
-        requires std::is_invocable_r_v<web::task, invocable_t, const http::query_t&, const http::header_t&>
-    app& GET(std::string_view path, invocable_t& handler);
+    app& GET(std::string_view path, GET_route_handler_t handler);
 
-    app& GET(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&) -> web::task);
-
-    template<typename invocable_t>
-        requires std::is_invocable_r_v<web::task, invocable_t, const http::query_t&, const http::header_t&, const http::body_t&>
-    app& POST(std::string_view path, invocable_t& handler);
-
-    app& POST(std::string_view path, void* helper_ptr, auto (*handler)(void*, const http::query_t&, const http::header_t&, const http::body_t&) -> web::task);
-
+    app& POST(std::string_view path, POST_route_handler_t handler);
+    
     void run();
 };
-
-template<typename invocable_t>
-    requires std::is_invocable_r_v<web::task, invocable_t, const http::query_t&, const http::header_t&> 
-app& app::GET(std::string_view path, invocable_t& handler){
-    static_assert(!std::is_function_v<invocable_t>, "Handler cannot be a function, use a lambda or a functor instead.");
-
-    return GET(path, &handler, [](void* helper_ptr, const http::query_t& query, const http::header_t& header) -> web::task {
-        return static_cast<invocable_t*>(helper_ptr)->operator()(query, header);
-    });
-
-}
-
-template<typename invocable_t>
-    requires std::is_invocable_r_v<web::task, invocable_t, const http::query_t&, const http::header_t&, const http::body_t&>
-app& app::POST(std::string_view path, invocable_t& handler){
-    static_assert(!std::is_function_v<invocable_t>, "Handler cannot be a function, use a lambda or a functor instead.");
-
-    return POST(path, &handler, [](void* helper_ptr, const http::query_t& query, const http::header_t& header, const http::body_t& body) -> web::task {
-        return static_cast<invocable_t*>(helper_ptr)->operator()(query, header, body);
-    });
-
-}
 
 
 

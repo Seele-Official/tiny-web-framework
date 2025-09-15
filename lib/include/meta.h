@@ -1,5 +1,6 @@
 #pragma once
 #include <concepts>
+#include <functional>
 #include <optional>
 #include <type_traits>
 #include <tuple>
@@ -520,4 +521,51 @@ match(T&&) -> match<T&&>;
 
 template <typename T>
 match(const T&) -> match<T&>;
+
+
+
+template <typename signature_t>
+class function_ref {
+    static_assert(false, "signature_t must be a function type");
+};
+
+template <typename R, typename... args_t>
+class function_ref<R(args_t...)> {
+public:
+    using erased_t = union{
+        void* ctx;
+        void (*fn)(void);
+    };
+
+    function_ref(const function_ref&) = default;
+    function_ref(function_ref&&) = default;
+
+    function_ref& operator=(const function_ref&) = default;
+    function_ref& operator=(function_ref&&) = default;
+
+
+    template<typename invocable_t>
+        requires std::is_invocable_r_v<R, invocable_t, args_t...> && (!std::is_function_v<invocable_t>)
+    function_ref(invocable_t& inv)
+      : proxy{[](erased_t c, args_t... args) -> R {
+            return std::invoke(*static_cast<invocable_t*>(c.ctx), static_cast<args_t>(args)...);
+        }},
+        ctx{.ctx = static_cast<void*>(&inv)}
+    {}
+
+    template<typename invocable_t>
+        requires std::is_invocable_r_v<R, invocable_t, args_t...> && std::is_function_v<invocable_t>
+    function_ref(invocable_t& inv)
+      : proxy{[](erased_t c, args_t... args) -> R {
+            return std::invoke(reinterpret_cast<invocable_t*>(c.fn), static_cast<args_t>(args)...);
+        }}, 
+        ctx{.fn = reinterpret_cast<void(*)()>(inv)}
+    {}
+
+    R operator()(args_t... args) const { return proxy(ctx, static_cast<args_t>(args)...); }
+
+private:
+    R (*proxy)(erased_t, args_t...);
+    erased_t ctx;
+};
 }
