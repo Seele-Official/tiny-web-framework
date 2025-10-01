@@ -50,7 +50,7 @@ public:
     void insert(dynamic::path_template path, dynamic::router r) {
         auto curr = &this->root;
 
-        for (auto part : path.parts) {
+        for (auto part : path.parts()) {
             switch (part.type) {
                 case dynamic::path_template::part::static_part: {
                     if (auto it = curr->children.find(std::string(part.str)); it != curr->children.end()) {
@@ -136,6 +136,8 @@ route_result route(const request::msg& req){
     auto& [method, target, version] = req.line;
 
     if (auto origin = std::get_if<http::request::origin_form>(&target)) {
+        // Notice: we assume that the path is already percent-decoded
+
         auto& map = static_router_map(req.line.method);
         auto& tree = dynamic_router_tree(req.line.method);
 

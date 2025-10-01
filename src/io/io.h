@@ -3,9 +3,21 @@
 #include <cstring>
 #include <ctime>
 
+#include <filesystem>
 #include <liburing.h>
 #include <liburing/io_uring.h>
 
+#include <unistd.h>
+#include <fcntl.h>
+#include <linux/fs.h>
+#include <sys/stat.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <sys/types.h>
+#include <sys/sendfile.h>
+#include <sys/mman.h>
 
 #include "io/ctx.h"
 #include "io/error.h"
@@ -37,45 +49,128 @@ inline int32_t register_files_sparse(uint32_t count) {
 }
 
 
-struct fd_wrapper {
-    
-    fd_wrapper() = default;
-    
-    fd_wrapper(int fd) : fd(fd) {}
-    fd_wrapper(fd_wrapper&) = delete;
-    fd_wrapper(fd_wrapper&& other) noexcept : fd(other.fd) {
-        other.fd = -1; // Prevent the destructor from closing the fd
+class fd {
+public:
+    fd() = default;
+    fd(int fd) : m_fd(fd) {}
+    fd(fd&) = delete;
+    fd(fd&& other) : fd(other.m_fd) {
+        other.m_fd = -1; 
     }
-    fd_wrapper& operator=(fd_wrapper&) = delete;
-    fd_wrapper& operator=(fd_wrapper&& other) noexcept {
+    fd& operator=(fd&) = delete;
+    fd& operator=(fd&& other) {
         if (this != &other) {
             if (this->is_valid()) {
-                close(fd);
+                close(m_fd);
             }
-            fd = other.fd;
-            other.fd = -1; // Prevent the destructor from closing the fd
+            m_fd = other.m_fd;
+            other.m_fd = -1;
         }
         return *this;
+    }   
+
+    ~fd() {
+        if (this->is_valid()) {
+            close(m_fd);
+        }
     }
+
     int get() const {
-        return fd;
+        return m_fd;
     }
     int release() {
-        int temp = fd;
-        fd = -1; // Prevent the destructor from closing the fd
+        int temp = m_fd;
+        m_fd = -1;
         return temp;
     }
     bool is_valid() const {
-        return fd >= 0;
+        return m_fd >= 0;
     }
-    ~fd_wrapper() {
-        if (this->is_valid()) {
-            close(fd);
+
+    static fd open_file(const std::filesystem::path& path, int flag){
+        return io::fd{open(path.c_str(), flag)};
+    }
+    
+    static fd open_socket(sockaddr_in addr, size_t max_connections) {
+        int fd = socket(PF_INET, SOCK_STREAM, 0);
+        if (bind(fd, (sockaddr*)&addr, sizeof(addr)) < 0) {
+            return -1;
+        }
+        if (listen(fd, max_connections) < 0) {
+            return -1;
+        }
+        return fd;
+    }
+
+
+private:
+    int m_fd{-1};
+};
+
+inline int64_t get_file_size(const fd& fd_w) {
+    struct stat st;
+
+    if(fstat(fd_w.get(), &st) < 0) {
+        return -1;
+    }
+    if (S_ISBLK(st.st_mode)) {
+        int64_t bytes;
+        if (ioctl(fd_w.get(), BLKGETSIZE64, &bytes) != 0) {
+            return -1;
+        }
+        return bytes;
+    } else if (S_ISREG(st.st_mode))
+        return st.st_size;
+
+    return -1;
+}
+
+class mmap{
+public:
+    mmap() = default;
+    mmap(size_t length, int prot, int flags, int fd, off_t offset = 0) 
+        : size(length), data(::mmap(nullptr, length, prot, flags, fd, offset)) {
+        if (data == MAP_FAILED) {
+            std::println("Failed to mmap file: {}", strerror(errno));
+            std::println("Parameters: length={}, prot={}, flags={}, fd={}, offset={}", 
+                         length, prot, flags, fd, offset);
+            std::terminate();
+        }
+    }
+
+    mmap(const mmap&) = delete;
+    mmap(mmap&& other) : size(other.size), data(other.data) {
+        other.data = nullptr;
+        other.size = 0;
+    }
+    mmap& operator=(mmap&& other) {
+        if (this != &other) {
+            if (data) {
+                munmap(data, size);
+            }
+            size = other.size;
+            data = other.data;
+            other.data = nullptr;
+            other.size = 0;
+        }
+        return *this;
+    }
+
+    mmap& operator=(const mmap&) = delete;
+
+    ~mmap(){
+        if (data) {
+            munmap(data, size);
         }
     }
     
-    int fd{-1};
+    size_t get_size() const { return this->size; };
+    void*  get_data() const { return this->data; }
+private:
+    size_t size{0};
+    void*  data{nullptr};
 };
+
 } // namespace io
 
 

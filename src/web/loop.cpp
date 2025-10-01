@@ -1,11 +1,13 @@
 #include <cstdint>
 #include <csignal>
+#include <utility>
 
 #include "log.h"
 
 #include "io/io.h"
 #include "web/ip.h"
 #include "web/loop.h"
+#include "web/mime.h"
 #include "http/http.h"
 
 #include "coro/simple_task.h"
@@ -19,7 +21,7 @@ namespace web::loop {
 using namespace seele;
 using namespace std::literals;
 coro::simple_task async_handle_connection(int fd, ip::v4 a) {
-    io::fd_wrapper fd_w(fd);
+    io::fd fd_w(fd);
     ip::v4 client_addr = a;
     co_await coro::thread::dispatch_awaiter{};
 
@@ -128,9 +130,51 @@ void add_static_file_router(){
         std::terminate();
     }
 
-    // TODO: Add router for static files
-    // TODO: Add file caching optimization for static files
+    web::env::static_routers().reserve(512);
+    // Recursively iterate through the directory and add files to the static router
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(root)) {
+        if (entry.is_regular_file()) {
+            auto full_path = std::filesystem::absolute(entry.path());
+            log::sync::info("Adding file to cache: {}", full_path.string());
 
+            auto fd  = io::fd::open_file(full_path, O_RDONLY);
+
+            if (!fd.is_valid()) {
+                std::println("Failed to open file: {}", full_path.string());
+                std::terminate();
+            }
+
+            int64_t file_size = io::get_file_size(fd);
+            if (file_size < 0) {
+                std::println("Failed to get file size for {}", full_path.string());
+                std::terminate();
+            }
+            if (file_size == 0) {
+                std::println("File is empty: {}", full_path.string());
+                continue;
+            }
+            
+
+            std::string content_type = "application/octet-stream";
+            std::string ext = full_path.extension().string();
+            if (auto it = web::mime_types.find(ext);it != web::mime_types.end()) {
+                content_type = it->second;
+            }
+
+            web::env::static_routers().push_back(
+                web::env::file_router{
+                    full_path.string(), 
+                    content_type,
+                    {(size_t)file_size, PROT_READ, MAP_SHARED, fd.get(), 0}
+                }
+            );
+        }
+    }
+
+    // Register static file routers
+    for (auto& router : web::env::static_routers()) {
+        routing::get(router.name, router);
+    }
 }
 
 void run(){
@@ -142,9 +186,21 @@ void run(){
     add_static_file_router();
 
 
+    for (auto _ : std::views::iota(0, 4)){
+        auto fd = io::fd::open_socket(web::env::listen_addr().to_sockaddr_in(), 128);
+        int opt = 1;
+        setsockopt(fd.get(), SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt));
 
+        if (!fd.is_valid()) {
+            std::println("Failed to setup socket: {}", strerror(errno));
+            std::terminate();
+        }
+        env::accepter_fds().push_back(std::move(fd));
+    }
 
-
+    for (auto& fd: env::accepter_fds()){
+        server_loop(fd.get());
+    }
 
 
     std::signal(SIGINT, [](int) {

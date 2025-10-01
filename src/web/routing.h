@@ -1,6 +1,7 @@
 #pragma once
+#include <exception>
+#include <string>
 #include <string_view>
-#include <vector>
 #include <ranges>
 #include "function_ref.h"
 
@@ -39,7 +40,8 @@ using router = function_ref<
 >;
 
 // TODO: implement compile-time path template parsing
-struct path_template{
+class path_template{
+public:
     struct part{
         enum {
             static_part,
@@ -48,30 +50,42 @@ struct path_template{
         std::string_view str;
     };
 
+    template<typename... args_t>
+        requires std::is_constructible_v<std::string_view, args_t...>
+    consteval path_template(args_t&&... args): sv(std::forward<args_t>(args)...) {
 
-    static auto make(std::string_view sv){
-        return sv 
+        auto view = this->sv 
             | std::views::split('/')
-            | std::views::transform([](auto &&rng) {
-                std::string_view sv(&*rng.begin(), std::ranges::distance(rng));
+            | std::views::transform([](const auto &rng) {
+                return std::string_view(rng);
+            });
+
+        for (auto part : view) {
+            if (part.starts_with('{') && part.ends_with('}')) {
+                for (auto c : part.substr(1, part.size() - 2)) {
+                    if (!(('a' <= c && c <= 'z') || ('0' <= c && c <= '9') || c == '_')) {
+                        std::terminate();// throw std::invalid_argument("Invalid character in parameter name");
+                    }
+                }
+            }
+        }
+    }
+
+    auto parts(){
+        return this->sv 
+            | std::views::split('/')
+            | std::views::transform([](const auto &rng) {
+                std::string_view sv(rng);
                 if (sv.starts_with('{') && sv.ends_with('}')) {
                     return part{part::param_part, sv.substr(1, sv.size() - 2)};
                 } else {
                     return part{part::static_part, sv};
                 }
-            })
-            | std::ranges::to<std::vector<part>>();
-    };
-
-
-    path_template(std::string_view sv) : parts{make(sv)}{}
-
-    template<typename... args_t>
-        requires std::is_constructible_v<std::string_view, args_t...>
-    path_template(args_t&&... args) : parts(make(std::string_view{std::forward<args_t>(args)...})) {}
-
-
-    std::vector<part> parts;
+            });
+    }
+    
+private:
+    std::string_view sv{};
 };
 
 void get(path_template path, router r);

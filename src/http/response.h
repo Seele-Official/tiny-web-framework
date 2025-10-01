@@ -33,12 +33,6 @@ struct status_line{
             static_cast<size_t>(code), status_code_to_string(code)
         );
     }
-    std::string to_string() const {
-        return std::format(
-            "HTTP/1.1 {} {}\r\n", 
-            static_cast<size_t>(code), status_code_to_string(code)
-        );
-    }
 
     status_code code;
 };

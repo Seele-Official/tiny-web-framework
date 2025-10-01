@@ -116,7 +116,7 @@ suite<"dynamic routing"> __ = []{
         expect(called);
     };
 
-    "branching routes"_test = []{
+    "branching routes 1"_test = []{
         routing::dynamic::clear(http::request::method::GET);
 
         bool called_post = false;
@@ -154,6 +154,45 @@ suite<"dynamic routing"> __ = []{
             expect(!called_post && called_space);
         }
     };
+
+    "branching routes 2"_test = []{
+        routing::dynamic::clear(http::request::method::GET);
+
+        bool called_114514 = false;
+        bool called_2048 = false;
+
+        auto router_post = [&](const http::request::msg&, const std::unordered_map<std::string, std::string>& params) -> response::task {
+            called_114514 = true;
+            expect(params.at("name") == "seele");
+            return []() -> response::detail::send_task { co_return 0; }();
+        };
+        auto router_space = [&](const http::request::msg&, const std::unordered_map<std::string, std::string>& params) -> response::task {
+            called_2048 = true;
+            expect(params.at("name") == "seele");
+            expect(params.at("id") == "2048");
+            return []() -> response::detail::send_task { co_return 0; }();
+        };
+
+        routing::dynamic::get("/{name}/home/post/114514", router_post);
+        routing::dynamic::get("/{name}/home/post/{id}", router_space);
+
+        // match 114514
+        {
+            http::request::msg req{{ http::request::method::GET, http::request::origin_form{"/seele/home/post/114514", ""}, "HTTP/1.1" }};
+            called_114514 = false; called_2048 = false;
+            routing::detail::route(req);
+            expect(called_114514 && !called_2048);
+        }
+
+        // match 2048
+        {
+            http::request::msg req{{ http::request::method::GET, http::request::origin_form{"/seele/home/post/2048", ""}, "HTTP/1.1" }};
+            called_114514 = false; called_2048 = false;
+            routing::detail::route(req);
+            expect(!called_114514 && called_2048);
+        }
+    };
+
 
     "route failure: trailing slash"_test = []{
         routing::dynamic::clear(http::request::method::GET);

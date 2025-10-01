@@ -1,10 +1,15 @@
 #pragma once
-
+#include <bits/types/struct_iovec.h>
 #include <coroutine>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <vector>
 
+#include "io/awaiter.h"
+#include "log.h"
 
+#include "io/io.h"
 #include "web/ip.h"
 
 #include "http/response.h"
@@ -12,7 +17,7 @@
 
 
 namespace web::response {
-
+using namespace seele;
 namespace detail {
 
 struct settings{
@@ -133,9 +138,153 @@ struct task {
 
 inline task error(http::response::status_code code){
     return [](http::response::status_code code) -> detail::send_task {
-        co_await task::wait_setting{};
+        http::response::msg msg{
+            {code},
+            {
+                {"Content-Type", "text/html; charset=utf-8"},
+                {"X-Content-Type-Options", "nosniff"},
+            }
+        };
+        std::vector<char> buffer{};
+        buffer.reserve(128);
+        msg.format_to(std::back_inserter(buffer));
+        // TODO: Add a simple HTML body based on status code
+        // For now, we just send the status line and headers
+        auto [fd, client_addr, timeout] = co_await task::wait_setting{};
+
+        co_return co_await io::awaiter::link_timeout{
+            io::awaiter::write{fd, buffer.data(), (uint32_t) buffer.size()},
+            timeout
+        };
+
     }(code);
 }
 
+inline task file(const std::string& content_type, size_t size, void* data){
+    return [](const std::string& content_type, size_t size, void* data) -> detail::send_task {
+        std::vector<char> header_buffer{};
+        header_buffer.reserve(256);
+
+        http::response::msg msg{
+            {http::response::status_code::ok},
+            {
+                {"Content-Type", content_type},
+                {"Content-Length", std::to_string(size)},
+                {"Connection", "keep-alive"},
+            }
+        };
+
+        msg.format_to(std::back_inserter(header_buffer));
+
+        iovec iov[2] = {
+            {
+                header_buffer.data(),
+                header_buffer.size()
+            },
+            {
+                data,
+                size
+            }
+        };
+
+        auto [fd, client_addr, timeout] = co_await task::wait_setting{};
+
+
+        uint32_t total_size = iov[0].iov_len + iov[1].iov_len;
+        uint32_t sent_size = 0;
+        int32_t res = co_await io::awaiter::link_timeout{
+            io::awaiter::writev{
+                fd,
+                iov,
+                2
+            },
+            timeout
+        };
+
+        if (res <= 0) {
+            log::async::error(
+                "Failed to send response header for {} : {}", 
+                client_addr.to_string(), io::error::msg
+            );
+            co_return -1;
+        }
+        sent_size += res;
+
+        while (sent_size < total_size) {
+            auto offset = [&]() -> iovec {
+                if (sent_size < iov[0].iov_len) [[unlikely]] {
+                    return {static_cast<std::byte*>(iov[0].iov_base) + sent_size, iov[0].iov_len + iov[0].iov_len - sent_size};
+                } else {
+                    auto offset_in_data = sent_size - iov[0].iov_len;
+                    return {static_cast<std::byte*>(iov[1].iov_base) + offset_in_data, iov[1].iov_len - offset_in_data};
+                }
+            }();
+
+            res = co_await io::awaiter::link_timeout{
+                io::awaiter::writev{
+                    fd,
+                    &offset,
+                    1
+                },
+                timeout
+            };
+
+            if (res <= 0) {
+                log::async::error(
+                    "Failed to send response header for {} : {}", 
+                    client_addr.to_string(), io::error::msg
+                );
+                co_return -1;
+            }
+            sent_size += res;
+        }
+
+        co_return sent_size;
+    }(content_type, size, data);
+}
+
+inline task file(const std::string& content_type, const io::mmap& content){
+    return response::file(content_type, content.get_size(), content.get_data());
+}
+
+
+
+inline task msg(const http::response::msg& msg){ 
+    return [](const http::response::msg& msg) -> detail::send_task {
+        std::vector<char> buffer{};
+
+        buffer.reserve(1024 + msg.body.size());
+
+        msg.format_to(std::back_inserter(buffer));
+
+        auto [fd, client_addr, timeout] = co_await task::wait_setting{};
+
+        
+        uint32_t total_size = static_cast<uint32_t>(buffer.size());
+        uint32_t sent_size = 0;
+        while (sent_size < total_size) {
+            auto offset = buffer.data() + sent_size;
+            auto remaining_size = total_size - sent_size;
+            int32_t res = co_await io::awaiter::link_timeout{
+                io::awaiter::write{
+                    fd,
+                    offset,
+                    remaining_size
+                },
+                timeout
+            };
+            if (res <= 0) {
+                log::async::error(
+                    "Failed to send response for `{}`: `{}`", 
+                    client_addr.to_string(), io::error::msg
+                );
+                co_return -1;
+            }
+            sent_size += res;
+        }
+        co_return sent_size;
+    }(msg);
+
+}
 };
 
