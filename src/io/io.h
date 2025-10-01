@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <ctime>
@@ -129,7 +130,7 @@ class mmap{
 public:
     mmap() = default;
     mmap(size_t length, int prot, int flags, int fd, off_t offset = 0) 
-        : size(length), data(::mmap(nullptr, length, prot, flags, fd, offset)) {
+        : size(length), data(static_cast<std::byte*>(::mmap(nullptr, length, prot, flags, fd, offset))) {
         if (data == MAP_FAILED) {
             std::println("Failed to mmap file: {}", strerror(errno));
             std::println("Parameters: length={}, prot={}, flags={}, fd={}, offset={}", 
@@ -164,11 +165,11 @@ public:
         }
     }
     
-    size_t get_size() const { return this->size; };
-    void*  get_data() const { return this->data; }
+    size_t      get_size() const { return this->size; };
+    std::byte*  get_data() const { return this->data; }
 private:
-    size_t size{0};
-    void*  data{nullptr};
+    size_t      size{0};
+    std::byte*  data{nullptr};
 };
 
 } // namespace io

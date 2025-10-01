@@ -1,8 +1,10 @@
 #pragma once
+#include <charconv>
 #include <cstdint>
 #include <cstring>
-#include <compare>
+#include <vector>
 #include <format>
+#include <ranges>
 
 #ifdef __linux__
 #include <netinet/in.h>
@@ -30,14 +32,14 @@ constexpr T hton(T value) {
 }
 
 constexpr std::string inet_ntoa(uint32_t addr) {
-    addr = ntoh(addr);
-    std::string ip;
-    for (size_t i = 0; i < 4; i++) {
-        ip.insert(0, std::to_string(addr & 0xFF));
-        if (i != 3) ip.insert(0, ".");
-        addr >>= 8;
-    }
-    return ip;
+    return std::views::iota(0, 4)
+        | std::views::transform([&addr](int){
+            std::string part = std::to_string(addr & 0xFF);
+            addr >>= 8;
+            return part;
+        })
+        | std::views::join_with('.')
+        | std::ranges::to<std::string>();
 }
 
 struct v4{
@@ -52,6 +54,38 @@ struct v4{
 
     inline std::string to_string() const {
         return std::format("{}:{}", inet_ntoa(net_address), ntoh(net_port));
+    }
+
+    inline static v4 from_string(const std::string& addr) {
+        auto pos = addr.find(':');
+        if (pos == std::string::npos) return v4{};
+        std::string ip_str = addr.substr(0, pos);
+        std::string port_str = addr.substr(pos + 1);
+
+        auto ip_parts = std::views::split(ip_str, '.')
+            | std::views::transform([](auto&& rng){
+                return std::string_view(rng);
+            })
+            | std::ranges::to<std::vector<std::string_view>>();
+
+        if (ip_parts.size() != 4) return v4{};
+        uint32_t ip = 0;
+        for (auto part : ip_parts) {
+            uint8_t byte = 0;
+            auto ret = std::from_chars(part.data(), part.data() + part.size(), byte);
+            if (ret.ec == std::errc()) {
+                ip = (ip << 8) | byte;
+            } else {
+                return v4{};
+            }
+        }
+        uint16_t port = 0;
+        auto ret = std::from_chars(port_str.data(), port_str.data() + port_str.size(), port);
+        if (ret.ec != std::errc()) {
+            return v4{};
+        }
+
+        return v4{hton(ip), hton(port)};
     }
 #ifdef __linux__
     inline sockaddr_in to_sockaddr_in() const {

@@ -42,19 +42,19 @@ namespace detail {
 
 
 
-web::ip::v4& listen_addr(){
+inline web::ip::v4& listen_addr(){
     return detail::get_instance().listen_addr;
 }
 
-std::filesystem::path& root_path(){
+inline std::filesystem::path& root_path(){
     return detail::get_instance().root_path;
 }
 
-std::vector<io::fd>& accepter_fds(){
+inline std::vector<io::fd>& accepter_fds(){
     return detail::get_instance().accepter_fds;
 }
 
-std::vector<file_router>& static_routers(){
+inline std::vector<file_router>& static_routers(){
     return detail::get_instance().static_routers;
 }
 

@@ -1,14 +1,13 @@
 #include <cstdint>
 #include <csignal>
 #include <utility>
-
+#include <filesystem>
 #include "log.h"
 
 #include "io/io.h"
 #include "web/ip.h"
 #include "web/loop.h"
 #include "web/mime.h"
-#include "http/http.h"
 
 #include "coro/simple_task.h"
 #include "coro/thread.h"
@@ -33,12 +32,12 @@ coro::simple_task async_handle_connection(int fd, ip::v4 a) {
         auto parser = http::request::parser{};
 
         while (parser.empty()) {
-            int32_t res = co_await io::awaiter::link_timeout{
+            int32_t bytes_read = co_await io::awaiter::link_timeout{
                 io::awaiter::read{fd_w.get(), read_buffer, sizeof(read_buffer)},
                 timeout
             };
 
-            if (auto bytes_read = res; bytes_read <= 0) {
+            if (bytes_read <= 0) {
                 log::async::error("Failed to read from {}: {}", 
                     client_addr.to_string(), io::error::msg
                 );
@@ -135,7 +134,7 @@ void add_static_file_router(){
     for (const auto& entry : std::filesystem::recursive_directory_iterator(root)) {
         if (entry.is_regular_file()) {
             auto full_path = std::filesystem::absolute(entry.path());
-            log::sync::info("Adding file to cache: {}", full_path.string());
+            
 
             auto fd  = io::fd::open_file(full_path, O_RDONLY);
 
@@ -161,9 +160,12 @@ void add_static_file_router(){
                 content_type = it->second;
             }
 
+            auto relative_path_str = std::format("/{}", full_path.lexically_relative(root).c_str());
+            log::sync::info("Adding file `{}` to router as `{}`", full_path.string(), relative_path_str);
+
             web::env::static_routers().push_back(
                 web::env::file_router{
-                    full_path.string(), 
+                    relative_path_str, 
                     content_type,
                     {(size_t)file_size, PROT_READ, MAP_SHARED, fd.get(), 0}
                 }
@@ -173,6 +175,7 @@ void add_static_file_router(){
 
     // Register static file routers
     for (auto& router : web::env::static_routers()) {
+        log::sync::info("Adding file router: {}", router.name);
         routing::get(router.name, router);
     }
 }
@@ -186,7 +189,7 @@ void run(){
     add_static_file_router();
 
 
-    for (auto _ : std::views::iota(0, 4)){
+    for (auto _ : std::views::iota(0, 1)){
         auto fd = io::fd::open_socket(web::env::listen_addr().to_sockaddr_in(), 128);
         int opt = 1;
         setsockopt(fd.get(), SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt));
@@ -205,7 +208,9 @@ void run(){
 
     std::signal(SIGINT, [](int) {
         std::println("Received SIGINT, stopping server...");
-
+        for (auto& fd: env::accepter_fds()){
+            cancel(fd.get());
+        }
         // TODO : Graceful shutdown
         std::atomic_thread_fence(std::memory_order_seq_cst);
         io::request_stop(); 

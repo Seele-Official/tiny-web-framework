@@ -3,6 +3,8 @@
 #include "io/error.h"
 #include "io/ctx.h"
 #include "meta.h"
+#include <cstddef>
+#include <cstdint>
 
 namespace io::awaiter {
     using namespace seele;
@@ -77,9 +79,9 @@ namespace io::awaiter {
         int fd;
         void* buf;
         size_t len;
-        off_t offset;
+        size_t offset;
 
-        read(int fd, void* buf, size_t len, off_t offset = 0)
+        read(int fd, void* buf, size_t len, size_t offset = 0)
             : fd(fd), buf(buf), len(len), offset(offset) {}
 
         void setup(io_uring_sqe* sqe) {
@@ -91,9 +93,9 @@ namespace io::awaiter {
         int fd;
         const void* buf;
         unsigned int len;
-        off_t offset;
+        size_t offset;
 
-        write(int fd, const void* buf, unsigned int len, off_t offset = 0)
+        write(int fd, const void* buf, unsigned int len, size_t offset = 0)
             : fd(fd), buf(buf), len(len), offset(offset) {}
 
         void setup(io_uring_sqe* sqe) {
@@ -104,10 +106,10 @@ namespace io::awaiter {
     struct readv : base<readv> {
         int fd;
         const iovec* iov;
-        unsigned nr_iov;
-        off_t offset;
+        uint32_t nr_iov;
+        size_t offset;
 
-        readv(int fd, const iovec* iov, unsigned nr_iov = 1, off_t offset = 0)
+        readv(int fd, const iovec* iov, uint32_t nr_iov = 1, size_t offset = 0)
             : fd(fd), iov(iov), nr_iov(nr_iov), offset(offset) {}
 
         void setup(io_uring_sqe* sqe) {
@@ -118,10 +120,10 @@ namespace io::awaiter {
     struct writev : base<writev> {
         int fd;
         const iovec* iov;
-        unsigned nr_iov;
-        off_t offset;
+        uint32_t nr_iov;
+        size_t offset;
         writev() = default;
-        writev(int fd, const iovec* iov, unsigned nr_iov, off_t offset = 0)
+        writev(int fd, const iovec* iov, uint32_t nr_iov, size_t offset = 0)
             : fd(fd), iov(iov), nr_iov(nr_iov), offset(offset) {}
 
         void setup(io_uring_sqe* sqe) {
@@ -145,9 +147,9 @@ namespace io::awaiter {
         int fd_index;
         void* buf;
         size_t len;
-        off_t offset;
+        size_t offset;
 
-        read_direct(int fd_index, void* buf, size_t len, off_t offset = 0)
+        read_direct(int fd_index, void* buf, size_t len, size_t offset = 0)
             : fd_index(fd_index), buf(buf), len(len), offset(offset) {}
 
         void setup(io_uring_sqe* sqe) {
@@ -160,9 +162,9 @@ namespace io::awaiter {
         int fd_index;
         const void* buf;
         unsigned int len;
-        off_t offset;
+        size_t offset;
 
-        write_direct(int fd_index, const void* buf, unsigned int len, off_t offset = 0)
+        write_direct(int fd_index, const void* buf, unsigned int len, size_t offset = 0)
             : fd_index(fd_index), buf(buf), len(len), offset(offset) {}
 
         void setup(io_uring_sqe* sqe) {
@@ -174,10 +176,10 @@ namespace io::awaiter {
     struct writev_direct : base<writev_direct> {
         int fd_index;
         const iovec* iov;
-        unsigned nr_iov;
-        off_t offset;
+        uint32_t nr_iov;
+        size_t offset;
 
-        writev_direct(int fd_index, const iovec* iov, unsigned nr_iov, off_t offset = 0)
+        writev_direct(int fd_index, const iovec* iov, uint32_t nr_iov, size_t offset = 0)
             : fd_index(fd_index), iov(iov), nr_iov(nr_iov), offset(offset) {}
 
         void setup(io_uring_sqe* sqe) {
