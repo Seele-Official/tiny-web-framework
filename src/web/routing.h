@@ -29,7 +29,13 @@ using router = function_ref<route_result(const request::msg&)>;
 
 void get(std::string_view path, router r);
 
+void head(std::string_view path, router r);
+
 void post(std::string_view path, router r);
+
+void put(std::string_view path, router r);
+
+void del(std::string_view path, router r);
 
 namespace dynamic{
 using router = function_ref<
@@ -89,13 +95,19 @@ private:
 };
 
 void get(path_template path, router r);
+
 void post(path_template path, router r);
 
+void head(path_template path, router r);
+
+void put(path_template path, router r);
+
+void del(path_template path, router r);
 
 // Only for testing purpose
 void clear(request::method m);
 
-};
+} // namespace dynamic
 
 
 }

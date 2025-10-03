@@ -164,19 +164,28 @@ void add_static_file_router(){
             log::sync::info("Adding file `{}` to router as `{}`", full_path.string(), relative_path_str);
 
             web::env::static_routers().push_back(
-                web::env::file_router{
-                    relative_path_str, 
-                    content_type,
-                    {(size_t)file_size, PROT_READ, MAP_SHARED, fd.get(), 0}
+                {
+                    web::env::file_head_router{
+                        relative_path_str,
+                        content_type,
+                        (size_t)file_size
+                    },
+                    web::env::file_router{
+                        relative_path_str, 
+                        content_type,
+                        {(size_t)file_size, PROT_READ, MAP_SHARED, fd.get(), 0}
+                    }
                 }
             );
+
         }
     }
 
     // Register static file routers
-    for (auto& router : web::env::static_routers()) {
+    for (auto& [head_router, router] : web::env::static_routers()) {
         log::sync::info("Adding file router: {}", router.name);
         routing::get(router.name, router);
+        routing::head(head_router.name, head_router);
     }
 }
 

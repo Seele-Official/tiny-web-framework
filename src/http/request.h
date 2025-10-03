@@ -19,7 +19,6 @@ enum method {
     DELETE,
     HEAD,
     OPTIONS,
-    PATCH,
     CONNECT,
     TRACE
 };

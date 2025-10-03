@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstddef>
 #include <filesystem>
+#include <utility>
 #include <vector>
 
 #include "io/io.h"
@@ -12,26 +14,38 @@
 namespace web::env {
 
 
+
 struct file_router{
     web::response::task operator()(const http::request::msg&){
         return web::response::file(
-            this->conten_type,
+            this->content_type,
             this->content
         );
     }
 
     std::string name{};
-    std::string conten_type{};
+    std::string content_type{};
     io::mmap    content{};
 };
 
+struct file_head_router{
+    web::response::task operator()(const http::request::msg&){
+        return web::response::file_head(
+            this->content_type, 
+            this->size
+        );
+    }
+    std::string name{};
+    std::string content_type{};
+    size_t size{};
+};
 
 namespace detail {
     struct env{
         std::filesystem::path root_path = std::filesystem::current_path() / "www";
         web::ip::v4 listen_addr{};
         std::vector<io::fd> accepter_fds{};
-        std::vector<file_router> static_routers{};
+        std::vector<std::pair<file_head_router, file_router>> static_routers{};
     };
 
     inline env& get_instance() {
@@ -54,7 +68,7 @@ inline std::vector<io::fd>& accepter_fds(){
     return detail::get_instance().accepter_fds;
 }
 
-inline std::vector<file_router>& static_routers(){
+inline std::vector<std::pair<file_head_router, file_router>>& static_routers(){
     return detail::get_instance().static_routers;
 }
 

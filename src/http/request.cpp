@@ -150,6 +150,11 @@ std::optional<target> parse_target(std::string_view str){
 
         return origin_form{std::string(path), std::string(query)};
     }
+
+    else if (str == "*") {
+        return asterisk_form{};
+    }
+
     return absolute_form{};
 }
 
