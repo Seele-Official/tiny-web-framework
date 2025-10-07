@@ -1,15 +1,32 @@
 {
+    // 使用 IntelliSense 了解相关属性。 
+    // 悬停以查看现有属性的描述。
+    // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-        {
-          "name": "调试 C++ (GDB)",
-          "type": "cppdbg",
-          "request": "launch",
-          "program": "${workspaceRoot}/build/web_server",
-          "args": ["-a", "127.0.0.1:8080", "-p", "${workspaceRoot}/static"],
-          "stopAtEntry": false,
-          "cwd": "${workspaceRoot}/build",
-          "MIMode": "gdb",
-        }
-      ]
+    {
+        "name": "unit test",
+        "type": "cppdbg",
+        "request": "launch",
+        "program": "${workspaceFolder}/build/unit_test",
+        "args": [],
+        "stopAtEntry": false,
+        "cwd": "${workspaceFolder}/build/",
+        "environment": [],
+        "externalConsole": false,
+        "MIMode": "gdb",
+    },
+    {
+        "name": "example",
+        "type": "cppdbg",
+        "request": "launch",
+        "program": "${workspaceFolder}/build/example",
+        "args": [],
+        "stopAtEntry": false,
+        "cwd": "${workspaceFolder}/build/",
+        "environment": [],
+        "externalConsole": false,
+        "MIMode": "gdb",
+    }
+    ]
 }
