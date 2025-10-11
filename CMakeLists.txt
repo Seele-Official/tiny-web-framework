@@ -16,9 +16,10 @@ file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c
 
 add_library(web_framework ${SOURCES})
 
-target_include_directories(web_framework PUBLIC 
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
-    # $<INSTALL_INTERFACE:include> # For installation, if you need it
+target_include_directories(web_framework 
+    PUBLIC 
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+        # $<INSTALL_INTERFACE:include> # For installation, if you need it
 )
 
 

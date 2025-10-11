@@ -1,1 +1,0 @@
-wrk -t10 -c1500 -d15s -T2s --latency http://127.0.0.1:8080/index.html

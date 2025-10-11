@@ -19,8 +19,8 @@ A simple web framework implemented in C++23 for study.
 
 1. **Clone the repository:**
    ```sh
-   git clone https://github.com/Seele-Official/webserver.git
-   cd webserver
+   git clone https://github.com/Seele-Official/tiny-web-framework.git
+   cd tiny-web-framework
    ```
 
 2. **Build using CMake:**

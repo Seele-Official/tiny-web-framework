@@ -2,18 +2,25 @@
 #include <cstddef>
 #include <iostream>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <format>
 #include <ostream>
 #include <source_location>
+#include <functional>
 #include <string_view>
 #include <print>
+#include <thread>
+#include <tuple>
+#include <type_traits>
 #include <utility>
 #include <chrono>
 #include <format>
+#include <vector>
 #include "meta.h"
+#include "concurrent/mpsc_ringbuffer.h"
 namespace seele::log{
-
+using namespace std::literals;
 enum class level{
     error,
     warn,
@@ -23,8 +30,53 @@ enum class level{
 };
 
 constexpr level log_level = level::info;
+constexpr size_t packet_batch_size = 256;
 
 namespace detail {
+
+class packet{
+public:
+    using deletor_signature = void(void*);
+    using logfunc_signature = void(void*);
+    packet() = default;
+    packet(void* ctx, logfunc_signature* logfunc, deletor_signature* deletor)
+        : ctx{ctx}, logfunc{logfunc}, deletor{deletor} {}
+    packet(const packet&) = delete;
+    packet(packet&& o) 
+        : ctx{std::exchange(o.ctx, nullptr)}, logfunc{std::exchange(o.logfunc, nullptr)}, deletor{std::exchange(o.deletor, nullptr)} {}
+    packet& operator=(const packet&) = delete;
+    packet& operator=(packet&& o) {
+        if (this != &o) {
+            if (deletor && ctx) {
+                deletor(ctx);
+            }
+            ctx = std::exchange(o.ctx, nullptr);
+            logfunc = std::exchange(o.logfunc, nullptr);
+            deletor = std::exchange(o.deletor, nullptr);
+        }
+        return *this;
+    }
+
+    ~packet(){
+        if (deletor && ctx) {
+            deletor(ctx);
+        }
+    }
+
+    template<level lvl, typename... args_t>
+    static packet make(args_t&&... args);
+
+    void log() const {
+        if (logfunc && ctx) {
+            logfunc(ctx);
+        }
+    }
+
+private:    
+    void*              ctx{nullptr};
+    logfunc_signature* logfunc{nullptr};
+    deletor_signature* deletor{nullptr};
+};
 
 class logger{
 public:
@@ -33,52 +85,83 @@ public:
     logger& operator=(const logger&) = delete;
     logger& operator=(logger&&) = delete;
 
+    class worker {
+    public:
+        worker() = default;
+        worker(const worker&) = delete;        
+        worker(worker&&) = delete;
+        worker& operator=(const worker&) = delete;
+        worker& operator=(worker&&) = delete;        
+        ~worker() {
+            while (this->ringbuffer.size() > 0) {
+                std::this_thread::sleep_for(10ms);
+            }
+            this->worker_thread.request_stop();
+            this->sem.release();
+        }
+
+        bool submit_packets(std::vector<packet>&& pkts) {
+            if (ringbuffer.emplace_back(std::move(pkts))) {
+                sem.release();
+                return true;
+            }
+            return false;
+        }
+
+    private:
+        void loop(std::stop_token st){
+            while(sem.acquire(), !st.stop_requested()){
+                auto pkts = ringbuffer.unsafe_pop_front();
+                for (auto& p : pkts) {
+                    p.log();
+                }
+            }
+        }
+
+        std::counting_semaphore<> sem{0};
+        concurrent::mpsc_ringbuffer<std::vector<packet>, 1024> ringbuffer{};
+        std::jthread worker_thread{
+            [this](std::stop_token st){
+                this->loop(st);
+            }
+        };
+    };
 
     inline static logger& get_instance() {
         static logger inst;
         return inst;
     }
 
-    inline void set_output(std::ostream& os) {
-        this->output = &os;
+    inline void set_output(std::ostream* os) {
+        this->output = os;
     }
 
-    inline void set_output_file(std::string_view filename) {
-        this->output = new std::ofstream{filename.data(), std::ios::app};
-    }
-
-    template<level lvl, typename... args_t>
-    void log(
-        std::source_location loc,
-        std::chrono::system_clock::time_point time,
-        std::format_string<args_t...> fmt,
-        args_t&&... args
-    ); 
-
-private:    
-    inline explicit logger() : output{&std::cout} {}
+private:
+    inline explicit logger() = default;
     inline ~logger() {
         if (output != &std::cout) {
             delete output;
         }
     }
-
-    std::mutex    mutex;    
-    std::ostream* output;        
+public:
+    std::shared_ptr<worker> worker_instance{std::make_shared<worker>()};
+    std::mutex    mutex{};    
+    std::ostream* output{&std::cout};
 };
 
 template<level lvl, typename... args_t>
-void logger::log(
+void log(
     std::source_location                  loc, 
     std::chrono::system_clock::time_point time, 
     std::format_string<args_t...>         fmt, 
     args_t&&...                           args
 ){
     if constexpr (lvl <= log_level) {
-        std::lock_guard lock(this->mutex);
+        auto& logger = detail::logger::get_instance();
+        std::lock_guard lock(logger.mutex);
 
         std::println(
-            *this->output,
+            *logger.output,
             "[{}] [{:%Y-%m-%d %H:%M:%S}]: `{}` at {}:{}:{}",
             meta::enum_name<lvl>(), 
             time,
@@ -87,14 +170,66 @@ void logger::log(
             ),
             loc.file_name(), loc.line(), loc.column()
         );
-
         
     }
 }
+
+template<level lvl, typename... args_t>
+packet packet::make(args_t&&... args){
+    using ctx_t = decltype(std::tuple(std::forward<args_t>(args)...));
+    auto* ctx = new ctx_t(std::forward<args_t>(args)...);
+    return packet{
+        ctx,
+        [](void* ctx){
+            auto* d = static_cast<ctx_t*>(ctx);
+            [&]<size_t... I>(std::index_sequence<I...>){
+                detail::log<lvl>(
+                    std::get<I>(*d)...
+                );
+            }(std::make_index_sequence<sizeof...(args_t)>{});
+        },
+        [](void* ctx){
+            delete static_cast<ctx_t*>(ctx);
+        }
+    };
+}
+
+struct tls_t{
+    tls_t(){
+        this->packets.reserve(packet_batch_size);
+    }
+    ~tls_t(){
+        if (!this->packets.empty()) {
+            this->submit();
+        }
+    }
+    void push(packet&& p){
+        this->packets.push_back(std::move(p));
+        if (this->packets.size() >= packet_batch_size) {
+            this->submit();
+        }
+    }
+private:    
+    void submit(){
+        if (worker.get()->submit_packets(std::move(packets))) {
+            packets.reserve(packet_batch_size);
+        } else {
+            std::println("log: packet drop");
+        }
+    }
+    std::shared_ptr<logger::worker> worker{logger::get_instance().worker_instance};
+    std::vector<packet> packets{};
 };
 
+inline auto& tls(){
+    thread_local static tls_t e{};
+    return e;
+}
+
+} //namespace detail
+
 inline void set_output_file(std::string_view filename) {
-    detail::logger::get_instance().set_output_file(filename);
+    detail::logger::get_instance().set_output(new std::ofstream{filename.data(), std::ios::app});
 }
 
 
@@ -108,50 +243,89 @@ struct basic_format_string_wrapper {
     std::format_string<args_t...> fmt;
 };
 
+
+namespace sync {
 template <typename... args_t>
 using format_string_wrapper = basic_format_string_wrapper<std::type_identity_t<args_t>...>;
 
-
-
-namespace sync {
-    template<level lvl, typename... args_t>
-    void log(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
+template<level lvl, typename... args_t>
+void log(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
+    if constexpr (lvl <= log_level) {
         auto [loc, fmt] = fmt_w;
-        if constexpr (lvl <= log_level) {
-            detail::logger::get_instance().log<lvl>(
-                loc, std::chrono::system_clock::now(), fmt, std::forward<args_t>(args)...
-            );
-        }
+        detail::log<lvl>(
+            loc, std::chrono::system_clock::now(), fmt, std::forward<args_t>(args)...
+        );
     }
+}
 
-    template<typename... args_t>
-    void error(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
-        log<level::error>(fmt_w, std::forward<args_t>(args)...);
+template<typename... args_t>
+void error(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
+    log<level::error>(fmt_w, std::forward<args_t>(args)...);
+}
+
+template<typename... args_t>
+void warn(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
+    log<level::warn>(fmt_w, std::forward<args_t>(args)...);
+}
+
+template<typename... args_t>
+void info(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
+    log<level::info>(fmt_w, std::forward<args_t>(args)...);
+}
+
+template<typename... args_t>
+void debug(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
+    log<level::debug>(fmt_w, std::forward<args_t>(args)...);
+}
+
+template<typename... args_t>
+void trace(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
+    log<level::trace>(fmt_w, std::forward<args_t>(args)...);
+}
+}//namespace sync
+
+
+namespace async{
+template <typename... args_t>
+using format_string_wrapper = basic_format_string_wrapper<std::unwrap_ref_decay_t<std::type_identity_t<args_t>>&...>;
+
+
+template<level lvl, typename... args_t>
+void log(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
+    if constexpr (lvl <= log_level) {
+        auto [loc, fmt] = fmt_w;
+        detail::tls().push(
+            detail::packet::make<lvl>(loc, std::chrono::system_clock::now(), fmt, std::forward<args_t>(args)...)
+        );
     }
+}
 
-    template<typename... args_t>
-    void warn(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
-        log<level::warn>(fmt_w, std::forward<args_t>(args)...);
-    }
+template<typename... args_t>
+void error(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
+    log<level::error>(fmt_w, std::forward<args_t>(args)...);
+}
 
-    template<typename... args_t>
-    void info(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
-        log<level::info>(fmt_w, std::forward<args_t>(args)...);
-    }
+template<typename... args_t>
+void warn(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
+    log<level::warn>(fmt_w, std::forward<args_t>(args)...);
+}
 
-    template<typename... args_t>
-    void debug(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
-        log<level::debug>(fmt_w, std::forward<args_t>(args)...);
-    }
+template<typename... args_t>
+void info(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
+    log<level::info>(fmt_w, std::forward<args_t>(args)...);
+}
 
-    template<typename... args_t>
-    void trace(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
-        log<level::trace>(fmt_w, std::forward<args_t>(args)...);
-    }
-};
+template<typename... args_t>
+void debug(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
+    log<level::debug>(fmt_w, std::forward<args_t>(args)...);
+}
 
-// TODO: async logging
-namespace async = sync;
+template<typename... args_t>
+void trace(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
+    log<level::trace>(fmt_w, std::forward<args_t>(args)...);
+}
+
+}//namespace async
 
 }
 
