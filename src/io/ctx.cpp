@@ -2,6 +2,7 @@
 #include <cerrno>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <exception>
 #include <optional>
@@ -61,7 +62,7 @@ void ctx::worker(std::stop_token st){
 
 
 void ctx::handle_cqes(io_uring_cqe* cqe) {
-    int head, count = 0;
+    uint32_t head, count = 0;
     size_t processed_req = 0;
     io_uring_for_each_cqe(&ring, head, cqe) {
         count++;

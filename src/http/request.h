@@ -12,7 +12,7 @@
 namespace http::request {
 using namespace seele;
 
-enum method {
+enum class method {
     GET,
     POST,
     PUT,

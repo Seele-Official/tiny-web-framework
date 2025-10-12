@@ -16,7 +16,7 @@ consteval std::string_view type_name() {
         #endif
     
 #if defined(__clang__)
-    constexpr std::string_view prefix = "std::string_view seele::meta::type_name() [auto T = ";
+    constexpr std::string_view prefix = "std::string_view seele::meta::type_name() [T = ";
     constexpr std::string_view suffix = "]";
 #elif defined(__GNUC__)
     constexpr std::string_view prefix = "consteval std::string_view seele::meta::type_name() [with auto T = ";

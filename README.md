@@ -6,8 +6,11 @@ A simple web framework implemented in C++23 for study.
 
 ## Features
 
-- **C++23:** 
-- **Proactor Pattern:**
+- **C++23** 
+- **Proactor Pattern**
+- **Asynchronous Logging System**
+- **Simple JSON Parser**
+- **Dynamic & Static Routing**
 
 ## Requirements
 
@@ -32,4 +35,4 @@ A simple web framework implemented in C++23 for study.
 
 ## Usage
 
-
+See the `example` directory for a simple usage example.

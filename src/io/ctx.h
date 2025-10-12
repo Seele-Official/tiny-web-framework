@@ -108,7 +108,6 @@ private:
     void handle_cqes(io_uring_cqe* cqe);
 
     ctx(uint32_t entries = 128, uint32_t flags = 0) : 
-        max_entries{entries}, 
         pending_req_count{0}, 
         unp_sem{0}, 
         usr_data_pool{1024*128} 
@@ -128,7 +127,6 @@ private:
     std::stop_source stop_src;
     std::jthread worker_thread; 
     std::atomic<bool> is_worker_running;
-    const size_t max_entries;
     std::atomic<size_t> pending_req_count;
 
     std::counting_semaphore<> unp_sem;

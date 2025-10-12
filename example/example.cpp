@@ -1,3 +1,4 @@
+#include "log.h"
 #include "web/env.h"
 #include "web/loop.h"
 #include "web/response.h"
@@ -18,21 +19,30 @@ http::response::msg make_success_msg(std::string&& content_type, std::string&& b
 }
 
 int main(){
+    using namespace seele;
+    // Configure the logging system
+    log::set_output_file("server.log");
 
+
+    // Configure the web server environment
     web::env::chain()
         .set_listen_addr(web::ip::v4::from_string("127.0.0.1:8080"))
         .set_root_path("www")
         .set_max_worker_conn(128)
-        .set_worker_count(4);
+        .set_worker_count(16)
+        /* Options for custom error page provider:
+         .set_error_page_provider([](http::response::status_code) -> std::string_view {})
+        */
+    ;
 
-
+    // Simple static route
     web::routing::get("/hello", [](const http::request::msg&) -> web::response::task {
         return web::response::msg(
             make_success_msg("text/plain", "Hello, World!")
         );
     });
 
-
+    // Dynamic route with parameter
     web::routing::dynamic::get("/user/{id}", [](const http::request::msg&, const std::unordered_map<std::string, std::string>& params) -> web::response::task {
         return web::response::msg(
             make_success_msg(
@@ -42,7 +52,7 @@ int main(){
         );
     });
 
-
+    // JSON response route
     web::routing::get("/data", [](const http::request::msg&) -> web::response::task {
         Json::object obj;
         obj["message"] = "Hello, JSON!";
@@ -54,6 +64,7 @@ int main(){
         );
     });
 
+    // POST route handling JSON body
     web::routing::post("/submit", [](const http::request::msg& req) -> web::response::task {
         auto body = req.body;
 
@@ -75,5 +86,6 @@ int main(){
         }
     });
 
+    // Start the event loop
     web::loop::run();
 }
