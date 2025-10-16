@@ -29,8 +29,8 @@ namespace io::awaiter {
 
     template<typename derived>
     struct base {
-        std::atomic<int32_t> io_ret;
-        std::coroutine_handle<> handle;
+        std::atomic<int32_t>    io_ret{};
+        std::coroutine_handle<> handle{};
         bool await_ready() { return false; }
         std::coroutine_handle<> await_suspend(std::coroutine_handle<> handle) {
             this->handle = handle;
@@ -94,7 +94,7 @@ namespace io::awaiter {
         unsigned int len;
         size_t offset;
 
-        write(int fd, const void* buf, unsigned int len, size_t offset = 0)
+        write(int fd, const void* buf, uint32_t len, size_t offset = 0)
             : fd(fd), buf(buf), len(len), offset(offset) {}
 
         void setup(io_uring_sqe* sqe) {
@@ -236,9 +236,9 @@ namespace io::awaiter {
         }
     };
 
-    struct time_out : base<time_out> {
+    struct sleep : base<sleep> {
         kernel_ts ts;
-        time_out(kernel_ts ts) : ts(ts) {}
+        sleep(kernel_ts ts) : ts(ts) {}
         void setup(io_uring_sqe* sqe) {
             io_uring_prep_timeout(sqe, &ts, 0, 0);
         }

@@ -1,4 +1,5 @@
 
+#include <cstdint>
 #include <vector>
 
 #include "log.h"
@@ -137,36 +138,90 @@ task file(const std::string& content_type, std::span<std::byte> content){
     size_t total_size = header.size() + content.size();
     size_t sent_size = 0;
 
+    // The first writev attempt, which may write both header and part of content
+    int32_t res = co_await io::awaiter::link_timeout{
+        io::awaiter::writev{ fd, iov, 2 },
+        timeout
+    };
 
-    struct iovec* current_iov = iov;
-    uint32_t iov_count = 2;
+    if (res <= 0) {
+        log::async::error(
+            "Failed to send response for {} : {}", 
+            client_addr.to_string(), io::error::msg
+        );
+        co_return -1;
+    }
 
-    while (sent_size < total_size) {
-        int32_t res = co_await io::awaiter::link_timeout{
-            io::awaiter::writev{ fd, current_iov, iov_count },
-            timeout
-        };
+    sent_size = res;
 
-        if (res <= 0) {
-            log::async::error(
-                "Failed to send response for {} : {}", 
-                client_addr.to_string(), io::error::msg
-            );
-            co_return -1;
+    // ================== Fast Path ==================
+    // Assume the common case where header is fully sent in the first writev
+    if (static_cast<size_t>(res) >= header.size()) [[likely]] { 
+        
+        size_t content_sent = res - header.size();
+        size_t content_remaining = content.size() - content_sent;
+        
+        auto content_ptr = content.data() + content_sent;
+
+
+        while (content_remaining > 0) {
+            res = co_await io::awaiter::link_timeout{
+                io::awaiter::write{ fd, content_ptr, (uint32_t) content_remaining },
+                timeout
+            };
+
+            if (res <= 0) {
+                log::async::error(
+                    "Failed to send response for {} : {}", 
+                    client_addr.to_string(), io::error::msg
+                );
+                co_return -1;
+            }
+
+            content_ptr += res;
+            content_remaining -= res;
+            sent_size += res;
         }
 
-        sent_size += res;
+    } 
+    // ================== Slow Path ==================
+    // Header not fully sent, need to handle partial header and content
+    else {
+        iovec* current_iov = iov;
+        uint32_t iov_count = 2;
+        
         auto written_bytes = static_cast<size_t>(res);
 
-        while (written_bytes > 0 && iov_count > 0) {
-            if (written_bytes < current_iov->iov_len) {
-                current_iov->iov_base = static_cast<char*>(current_iov->iov_base) + written_bytes;
-                current_iov->iov_len -= written_bytes;
-                written_bytes = 0; 
-            } else {
-                written_bytes -= current_iov->iov_len;
-                current_iov++;
-                iov_count--;
+        current_iov->iov_base = static_cast<char*>(current_iov->iov_base) + written_bytes;
+        current_iov->iov_len -= written_bytes;
+
+
+        while (sent_size < total_size) {
+            res = co_await io::awaiter::link_timeout{
+                io::awaiter::writev{ fd, current_iov, iov_count },
+                timeout
+            };
+            
+            if (res <= 0) { 
+                log::async::error(
+                    "Failed to send response for {} : {}", 
+                    client_addr.to_string(), io::error::msg
+                );
+                co_return -1; 
+            }
+
+            sent_size += res;
+            written_bytes = static_cast<size_t>(res);
+
+            while (written_bytes > 0 && iov_count > 0) {
+                size_t bytes_to_consume = std::min(written_bytes, current_iov->iov_len);
+                current_iov->iov_base = static_cast<char*>(current_iov->iov_base) + bytes_to_consume;
+                current_iov->iov_len -= bytes_to_consume;
+                written_bytes -= bytes_to_consume;
+                if (current_iov->iov_len == 0) {
+                    current_iov++;
+                    iov_count--;
+                }
             }
         }
     }

@@ -10,7 +10,7 @@
 #include <thread>
 #include <stop_token>
 #include <cstring>
-#include "concurrent/mpsc_msc_queue.h"
+#include "concurrent/mpsc_mpmc_queue.h"
 #include "concurrent/spsc_object_pool.h"
 
 

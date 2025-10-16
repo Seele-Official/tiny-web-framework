@@ -91,10 +91,10 @@ int main(){
 
     // Async
     web::routing::get("/async", [](const http::request::msg&) -> web::response::task {
-        using namespace std::chrono_literals;
+        using namespace std::literals;
 
         // Simulate async operation with timeout
-        co_await io::awaiter::time_out{ 1s};
+        co_await io::awaiter::sleep{1s};
 
         // Optional: get settings like fd, client_addr, timeout
         auto _ = co_await web::response::task::get_settings{};

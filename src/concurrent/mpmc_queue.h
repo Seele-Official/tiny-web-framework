@@ -10,37 +10,40 @@
 namespace seele::concurrent {
 
 template<typename T, size_t MAX_NODES = 64>
-struct msc_chunk{            
+struct mpmc_chunk{            
     enum status_t {
         EMPTY,
         READY,
         USED
     };
     struct node_t{
-        alignas(T) std::byte storage[sizeof(T)];
-        std::atomic<status_t> status;
+        alignas(T) std::byte storage[sizeof(T)]{};
+        std::atomic<status_t> status{EMPTY};
         T& get() {
             return *std::launder(reinterpret_cast<T*>(&storage));
         }
-        node_t() : storage{}, status(EMPTY) {}
     };
 
-    node_t data[MAX_NODES];
-    std::atomic<size_t> read_index;
-    std::atomic<size_t> write_index;
-    std::atomic<msc_chunk*> next;
-    msc_chunk() : data{}, read_index(0), write_index(0), next(nullptr) {}
+    node_t data[MAX_NODES]{};
+    std::atomic<size_t> read_index{0};
+    std::atomic<size_t> write_index{0};
+    std::atomic<mpmc_chunk*> next{nullptr};
+    // mpmc_chunk() {
+    //     this->read_index.store(0, std::memory_order_release);
+    //     this->write_index.store(0, std::memory_order_release);
+    // }
+    mpmc_chunk() = default;
 
     std::optional<T> pop_front();
 
     template<typename... args_t>
     bool emplace_back(args_t&&... args);
 
-    ~msc_chunk();
+    ~mpmc_chunk();
 };
 
 template<typename T, size_t MAX_NODES>
-std::optional<T> msc_chunk<T, MAX_NODES>::pop_front(){
+std::optional<T> mpmc_chunk<T, MAX_NODES>::pop_front(){
     while (true) {
         size_t read_idx = read_index.load(std::memory_order_acquire);
         size_t write_idx = write_index.load(std::memory_order_acquire);
@@ -64,7 +67,7 @@ std::optional<T> msc_chunk<T, MAX_NODES>::pop_front(){
 
 template<typename T, size_t MAX_NODES>
 template<typename... args_t>
-bool msc_chunk<T, MAX_NODES>::emplace_back(args_t&&... args) {
+bool mpmc_chunk<T, MAX_NODES>::emplace_back(args_t&&... args) {
 
     while (true) {
         size_t write_idx = write_index.load(std::memory_order_acquire);
@@ -80,7 +83,7 @@ bool msc_chunk<T, MAX_NODES>::emplace_back(args_t&&... args) {
     }
 }
 template<typename T, size_t MAX_NODES>
-msc_chunk<T, MAX_NODES>::~msc_chunk(){
+mpmc_chunk<T, MAX_NODES>::~mpmc_chunk(){
     size_t r = read_index.load(std::memory_order_relaxed);
     size_t w = write_index.load(std::memory_order_relaxed);
     for (size_t i = r; i < w; ++i) {
@@ -92,13 +95,13 @@ msc_chunk<T, MAX_NODES>::~msc_chunk(){
 
 
 template <typename T, size_t N = 64>
-class msc_queue {
+class mpmc_queue {
 private:
-    using chunk_t = msc_chunk<T, N>;
+    using chunk_t = mpmc_chunk<T, N>;
 
 public:
-    msc_queue();
-    ~msc_queue();
+    mpmc_queue();
+    ~mpmc_queue();
 
     void push_back(const T& item) { emplace_back(item); }
 
@@ -117,14 +120,14 @@ private:
 
 
 template <typename T, size_t N>
-msc_queue<T, N>::msc_queue(){
+mpmc_queue<T, N>::mpmc_queue(){
     chunk_t* dummy = new chunk_t();
-    head_chunk.store(dummy, std::memory_order_relaxed);
-    tail_chunk.store(dummy, std::memory_order_relaxed);
+    head_chunk.store(dummy, std::memory_order_release);
+    tail_chunk.store(dummy, std::memory_order_release);
 }
 
 template <typename T, size_t N>
-msc_queue<T, N>::~msc_queue() {
+mpmc_queue<T, N>::~mpmc_queue() {
     chunk_t* current = head_chunk.load(std::memory_order_relaxed);
     while (current) {
         chunk_t* next = current->next.load(std::memory_order_relaxed);
@@ -135,7 +138,7 @@ msc_queue<T, N>::~msc_queue() {
 
 template <typename T, size_t N>
 template<typename... args_t>
-void msc_queue<T, N>::emplace_back(args_t&&... args) {
+void mpmc_queue<T, N>::emplace_back(args_t&&... args) {
 
     constexpr size_t HAZ_TAIL = 0;
 
@@ -194,7 +197,7 @@ void msc_queue<T, N>::emplace_back(args_t&&... args) {
 }
 
 template <typename T, size_t N>
-std::optional<T> msc_queue<T, N>::pop_front() {
+std::optional<T> mpmc_queue<T, N>::pop_front() {
     constexpr size_t HAZ_HEAD = 0;
     constexpr size_t HAZ_NEXT = 1;
 

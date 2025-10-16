@@ -19,18 +19,19 @@ struct mpsc_chunk{
         USED
     };
     struct node_t{
-        alignas(T) std::byte storage[sizeof(T)];
-        std::atomic<status_t> status;
+        alignas(T) std::byte storage[sizeof(T)]{};
+        std::atomic<status_t> status{EMPTY};
         T& get() {
             return *std::launder(reinterpret_cast<T*>(&storage));
         }
-        node_t() : storage{}, status(EMPTY) {}
     };
-    node_t data[MAX_NODES];
-    size_t read_index;
-    std::atomic<size_t> write_index;
-    std::atomic<mpsc_chunk*> next;
-    mpsc_chunk() : data{}, read_index(0), write_index(0), next(nullptr) {}
+    node_t data[MAX_NODES]{};
+    size_t read_index{0};
+    std::atomic<size_t> write_index{0};
+    std::atomic<mpsc_chunk*> next{nullptr};
+    mpsc_chunk() {
+        this->write_index.store(0, std::memory_order_release);
+    }
 
     std::optional<T> pop_front();
 

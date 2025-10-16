@@ -1,5 +1,6 @@
 #pragma once
 
+#include <concepts>
 #include <coroutine>
 #include <chrono>
 #include <cstdint>
@@ -71,7 +72,9 @@ public:
             coro.promise().previous = h;
             return coro;
         }
-        auto await_suspend(std::coroutine_handle<promise_type> h) {
+        template<typename T>
+            requires std::derived_from<T, promise_type>
+        auto await_suspend(std::coroutine_handle<T> h) {
             coro.promise().sets = h.promise().sets;
             coro.promise().previous = h;
             return coro;

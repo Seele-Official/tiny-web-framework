@@ -1,5 +1,5 @@
 #include <boost/ut.hpp>
-#include "concurrent/msc_queue.h"
+#include "concurrent/mpmc_queue.h"
 #include <atomic>
 #include <thread>
 #include <vector>
@@ -27,12 +27,12 @@ std::atomic<int> CounterObj::copy_ctor{0};
 
 suite<"chunk optimized michael & scott's queue"> _ = [] {
     "empty pop"_test = [] {
-        msc_queue<int, 4> q;
+        mpmc_queue<int, 4> q;
         expect(!q.pop_front().has_value());
     };
 
     "single thread fifo"_test = [] {
-        msc_queue<int, 4> q;
+        mpmc_queue<int, 4> q;
         for (int i = 0; i < 10; ++i) q.push_back(i);
         for (int i = 0; i < 10; ++i) {
             auto v = q.pop_front();
@@ -43,7 +43,7 @@ suite<"chunk optimized michael & scott's queue"> _ = [] {
     };
 
     "multi chunk growth"_test = [] {
-        msc_queue<int, 4> q;
+        mpmc_queue<int, 4> q;
         for (int i = 0; i < 20; ++i) q.emplace_back(i);
         for (int i = 0; i < 20; ++i) {
             auto v = q.pop_front();
@@ -59,7 +59,7 @@ suite<"chunk optimized michael & scott's queue"> _ = [] {
         CounterObj::move_ctor.store(0);
         CounterObj::copy_ctor.store(0);
         {
-            msc_queue<CounterObj, 4> q;
+            mpmc_queue<CounterObj, 4> q;
             for (int i = 0; i < 10; ++i) q.emplace_back(i);
             CounterObj c(42);
             q.push_back(c);
@@ -74,7 +74,7 @@ suite<"chunk optimized michael & scott's queue"> _ = [] {
     struct Item { int producer; int seq; };
 
     "mpmc correctness"_test = [] {
-        msc_queue<Item, 64> q;
+        mpmc_queue<Item, 64> q;
         constexpr int producers = 4;
         constexpr int consumers = 4;
         constexpr int per_prod = 2000;
@@ -117,7 +117,7 @@ suite<"chunk optimized michael & scott's queue"> _ = [] {
     };
 
     "stress mpmc"_test = [] {
-        msc_queue<int, 64> q;
+        mpmc_queue<int, 64> q;
         constexpr int producers = 8;
         constexpr int consumers = 8;
         constexpr int per_prod = 1'000'000;

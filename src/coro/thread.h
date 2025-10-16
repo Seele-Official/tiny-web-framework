@@ -6,7 +6,7 @@
 #include <thread>
 #include <coroutine>
 #include <vector>
-#include "concurrent/msc_queue.h"
+#include "concurrent/mpmc_queue.h"
 namespace seele::coro::thread {
     
 namespace detail {
@@ -30,7 +30,7 @@ private:
     pool(size_t worker_count);        
     ~pool();  
 
-    concurrent::msc_queue<std::coroutine_handle<>> tasks;        
+    concurrent::mpmc_queue<std::coroutine_handle<>> tasks;        
     std::vector<std::jthread> workers;
     std::counting_semaphore<> sem;
 };

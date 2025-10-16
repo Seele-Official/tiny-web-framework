@@ -20,12 +20,11 @@ public:
         READY
     };
     struct node_t{
-        alignas(T) std::byte storage[sizeof(T)];
-        std::atomic<status_t> status;
+        alignas(T) std::byte storage[sizeof(T)]{};
+        std::atomic<status_t> status{EMPTY};
         T& get() {
             return *std::launder(reinterpret_cast<T*>(&storage));
         }
-        node_t() : storage{}, status(EMPTY) {}
     };
 
     size_t size() const {
