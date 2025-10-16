@@ -7,6 +7,7 @@
 #include <utility>
 #include <variant>
 #include "coro/sendable_task.h"
+#include "meta.h"
 
 
 namespace http::request {
@@ -42,6 +43,16 @@ using target = std::variant<
 >;
 
 struct line{
+    template<typename out_t>
+    auto format_to(out_t&& out) const {
+        return std::format_to(
+            std::forward<out_t>(out), 
+            "{} {} {}\r\n", 
+            meta::enum_to_string(method),
+            "this_is_a_placeholder", // TODO: Implement target
+            version
+        );
+    }
     request::method method;
     request::target target;
     std::string     version;
@@ -53,7 +64,15 @@ struct msg{
         header.clear();
         body.clear();
     }
-
+    template<typename out_t>
+    auto format_to(out_t&& out) const {
+        auto it = line.format_to(std::forward<out_t>(out));
+        for (const auto& [key, value] : header) {
+            it = std::format_to(it, "{}: {}\r\n", key, value);
+        }
+        it = std::format_to(it, "\r\n{}", body);
+        return it;
+    }
     request::line   line{};
     request::header header{};
     request::body   body{};

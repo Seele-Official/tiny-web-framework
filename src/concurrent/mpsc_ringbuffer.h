@@ -44,7 +44,7 @@ private:
     node_t& get_node(size_t index) {
         return buffer[index % N];
     }
-    std::array<node_t, N> buffer{};
+    alignas(64) std::array<node_t, N> buffer{};
     alignas(64) std::atomic<size_t> read_index{0};
     alignas(64) std::atomic<size_t> write_index{0};
 };

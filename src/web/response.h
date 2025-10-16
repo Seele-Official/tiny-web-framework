@@ -9,23 +9,23 @@
 #include "http/response.h"
 
 namespace web::response {
-namespace detail {
 
-struct settings{
-    int32_t                     fd{};
-    web::ip::v4                 client_addr{};
-    std::chrono::milliseconds   timeout{};
-};
 
-struct send_task {
+struct task {
 public:
+    struct settings{
+        int32_t                     fd{};
+        web::ip::v4                 client_addr{};
+        std::chrono::milliseconds   timeout{};
+    };
+
     struct promise_type{
-        send_task get_return_object(){
+        task get_return_object(){
             return this;
         }
 
         auto initial_suspend(){
-            return std::suspend_never{};
+            return std::suspend_always{};
         }
 
         struct final_awaiter {
@@ -51,16 +51,44 @@ public:
         settings                   sets{}; 
     };
 
-    send_task(promise_type* p): handle{handle_type::from_promise(*p)}{}
-    send_task(send_task& other) = delete;
-    send_task(send_task&& other) noexcept {
+    struct get_settings{
+        auto await_ready() { return false;}
+
+        bool await_suspend(std::coroutine_handle<promise_type> handle) {
+            this->promise = &handle.promise();
+            return false;
+        }
+        auto await_resume() {return promise->sets;}
+
+        promise_type* promise;
+    };    
+    
+    struct awaiter{
+        bool await_ready() { return false; }
+        int64_t await_resume() { return std::move(this->coro.promise().ret); }
+
+        auto await_suspend(std::coroutine_handle<> h) {
+            coro.promise().previous = h;
+            return coro;
+        }
+        auto await_suspend(std::coroutine_handle<promise_type> h) {
+            coro.promise().sets = h.promise().sets;
+            coro.promise().previous = h;
+            return coro;
+        }
+        std::coroutine_handle<promise_type> coro;
+    };
+
+    task(promise_type* p): handle{handle_type::from_promise(*p)}{}
+    task(task& other) = delete;
+    task(task&& other) noexcept {
         if (this != &other){
             this->handle = std::move(other.handle);
             other.handle = nullptr;             
         }
     }
-    send_task& operator=(send_task& other) = delete;
-    send_task& operator=(send_task&& other) noexcept {
+    task& operator=(task& other) = delete;
+    task& operator=(task&& other) noexcept {
         if (this != &other) {
             this->handle = std::move(other.handle);
             other.handle = nullptr;
@@ -68,25 +96,13 @@ public:
         return *this;
     }
 
-    ~send_task(){
+    ~task(){
         if (this->handle){
             this->handle.destroy();
         }
     }    
     
-    struct awaiter{
-        bool await_ready() { return false; }
-        int64_t await_resume() { return std::move(this->coro.promise().ret); }
-
-        auto await_suspend(std::coroutine_handle<> h)
-        {
-            coro.promise().previous = h;
-            return coro;
-        }
-        std::coroutine_handle<promise_type> coro;
-    };
-
-    send_task& init(settings sets){
+    task& settings(settings sets){
         this->handle.promise().sets = sets;
         return *this;
     }
@@ -99,32 +115,7 @@ private:
     using handle_type = std::coroutine_handle<promise_type>;
     handle_type handle;
 };
-} // namespace detail
 
-struct task {
-    struct wait_setting{
-        auto await_ready() { return false;}
-        
-        void await_suspend(std::coroutine_handle<detail::send_task::promise_type> handle) {
-            this->promise = &handle.promise();
-        }
-        auto await_resume() {return promise->sets;}
-
-        detail::send_task::promise_type* promise;
-    };
-
-    auto& settings(int fd, web::ip::v4 client_addr, std::chrono::milliseconds timeout){
-        return stask.init({fd, client_addr, timeout});
-    }
-
-    task() = delete;
-    task(const task&) = delete;
-    task(task&&) = default;
-    ~task() = default;
-    task(detail::send_task&& stask) : stask(std::move(stask)){}
-
-    detail::send_task stask;
-};
 
 task msg(const http::response::msg& msg);
 

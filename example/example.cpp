@@ -4,7 +4,10 @@
 #include "web/response.h"
 #include "web/routing.h"
 #include "json/json.h"
+#include "io/awaiter.h"
 #include <string_view>
+#include <vector>
+#include <chrono>
 
 
 http::response::msg make_success_msg(std::string&& content_type, std::string&& body) {
@@ -84,6 +87,22 @@ int main(){
                 )
             );
         }
+    });
+
+    // Async
+    web::routing::get("/async", [](const http::request::msg&) -> web::response::task {
+        using namespace std::chrono_literals;
+
+        // Simulate async operation with timeout
+        co_await io::awaiter::time_out{ 1s};
+
+        // Optional: get settings like fd, client_addr, timeout
+        auto _ = co_await web::response::task::get_settings{};
+        
+        // Return response
+        co_return co_await web::response::msg(
+            make_success_msg("text/plain", "This is an async response!")
+        );
     });
 
     // Start the event loop

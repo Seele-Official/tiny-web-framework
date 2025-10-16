@@ -236,6 +236,14 @@ namespace io::awaiter {
         }
     };
 
+    struct time_out : base<time_out> {
+        kernel_ts ts;
+        time_out(kernel_ts ts) : ts(ts) {}
+        void setup(io_uring_sqe* sqe) {
+            io_uring_prep_timeout(sqe, &ts, 0, 0);
+        }
+    };
+
 
     template<typename io_awaiter_t>
         requires std::is_base_of_v<base<io_awaiter_t>, io_awaiter_t>
@@ -298,5 +306,7 @@ namespace io::awaiter {
             return io_ret;
         }
     };
+
+
 
 } // namespace io::awaiter

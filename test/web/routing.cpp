@@ -33,7 +33,7 @@ suite<"static routing"> _ = []{
             called = true;
             expect(&req == &r);
 
-            return []() -> response::detail::send_task {
+            return []() -> response::task {
                 co_return 0;
             }();
 
@@ -63,7 +63,7 @@ suite<"static routing"> _ = []{
             called = true;
             expect(&req == &r);
 
-            return []() -> response::detail::send_task {
+            return []() -> response::task {
                 co_return 0;
             }();
 
@@ -103,7 +103,7 @@ suite<"dynamic routing"> __ = []{
             expect(params.contains("name") && params.at("name") == "seele");
             expect(params.contains("id") && params.at("id") == "114514");
 
-            return []() -> response::detail::send_task {
+            return []() -> response::task {
                 co_return 0;
             }();
 
@@ -126,13 +126,13 @@ suite<"dynamic routing"> __ = []{
             called_post = true;
             expect(params.at("name") == "seele");
             expect(params.at("id") == "114514");
-            return []() -> response::detail::send_task { co_return 0; }();
+            return []() -> response::task { co_return 0; }();
         };
         auto router_space = [&](const http::request::msg&, const std::unordered_map<std::string, std::string>& params) -> response::task {
             called_space = true;
             expect(params.at("name") == "seele");
             expect(params.at("id") == "2048");
-            return []() -> response::detail::send_task { co_return 0; }();
+            return []() -> response::task { co_return 0; }();
         };
 
         routing::dynamic::get("/{name}/home/post/{id}", router_post);
@@ -164,13 +164,13 @@ suite<"dynamic routing"> __ = []{
         auto router_post = [&](const http::request::msg&, const std::unordered_map<std::string, std::string>& params) -> response::task {
             called_114514 = true;
             expect(params.at("name") == "seele");
-            return []() -> response::detail::send_task { co_return 0; }();
+            return []() -> response::task { co_return 0; }();
         };
         auto router_space = [&](const http::request::msg&, const std::unordered_map<std::string, std::string>& params) -> response::task {
             called_2048 = true;
             expect(params.at("name") == "seele");
             expect(params.at("id") == "2048");
-            return []() -> response::detail::send_task { co_return 0; }();
+            return []() -> response::task { co_return 0; }();
         };
 
         routing::dynamic::get("/{name}/home/post/114514", router_post);
@@ -199,7 +199,7 @@ suite<"dynamic routing"> __ = []{
 
         bool called = false;
         auto router_post = [&](const http::request::msg&, const std::unordered_map<std::string, std::string>&) -> response::task {
-            called = true; return []() -> response::detail::send_task { co_return 0; }();
+            called = true; return []() -> response::task { co_return 0; }();
         };
         routing::dynamic::get("/{name}/home/post/{id}", router_post);
 

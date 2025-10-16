@@ -60,7 +60,7 @@ coro::simple_task async_handle_connection(int fd, ip::v4 a) {
             }
 
             co_await routing::detail::route(request)
-                        .settings(fd_w.get(), client_addr, timeout);
+                        .settings({fd_w.get(), client_addr, timeout});
             // TODO: Handle errors in response sending
             // For now, we assume response sending is always successful
 
@@ -68,7 +68,7 @@ coro::simple_task async_handle_connection(int fd, ip::v4 a) {
         } else {
             log::async::error("Failed to parse request from {}", client_addr.to_string());
             co_await web::response::error(http::response::status_code::bad_request)
-                        .settings(fd_w.get(), client_addr, timeout);
+                        .settings({fd_w.get(), client_addr, timeout});
             co_return;
         }
 

@@ -104,6 +104,7 @@ public:
     }
 
     void set_output(std::ostream* os) {
+        std::lock_guard lock(this->mutex);
         this->output = os;
     }
 
@@ -124,7 +125,7 @@ private:
         }
     }
 
-    std::counting_semaphore<> sem{0};
+    alignas(64) std::counting_semaphore<> sem{0};
     concurrent::mpsc_ringbuffer<std::vector<packet>, 1024> ringbuffer{};
     std::jthread worker_thread{
         [this](std::stop_token st){
