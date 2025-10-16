@@ -28,11 +28,10 @@ struct mpmc_chunk{
     std::atomic<size_t> read_index{0};
     std::atomic<size_t> write_index{0};
     std::atomic<mpmc_chunk*> next{nullptr};
-    // mpmc_chunk() {
-    //     this->read_index.store(0, std::memory_order_release);
-    //     this->write_index.store(0, std::memory_order_release);
-    // }
-    mpmc_chunk() = default;
+    mpmc_chunk() {
+        this->read_index.store(0, std::memory_order_release);
+        this->write_index.store(0, std::memory_order_release);
+    }
 
     std::optional<T> pop_front();
 

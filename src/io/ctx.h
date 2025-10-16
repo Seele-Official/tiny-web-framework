@@ -10,7 +10,7 @@
 #include <thread>
 #include <stop_token>
 #include <cstring>
-#include "concurrent/mpsc_mpmc_queue.h"
+#include "concurrent/mpsc_queue.h"
 #include "concurrent/spsc_object_pool.h"
 
 
@@ -130,7 +130,7 @@ private:
     std::atomic<size_t> pending_req_count;
 
     std::counting_semaphore<> unp_sem;
-    concurrent::mpsc_msc_queue<request> unprocessed_requests;
+    concurrent::mpsc_queue<request> unprocessed_requests;
 
     concurrent::spsc_object_pool<usr_data> usr_data_pool;
 };

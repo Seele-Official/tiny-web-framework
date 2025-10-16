@@ -86,13 +86,13 @@ mpsc_chunk<T, MAX_NODES>::~mpsc_chunk(){
 
 
 template <typename T, size_t N = 64>
-class mpsc_msc_queue {
+class mpsc_queue {
 private:
     using chunk_t = mpsc_chunk<T, N>;
 
 public:
-    mpsc_msc_queue();
-    ~mpsc_msc_queue();
+    mpsc_queue();
+    ~mpsc_queue();
 
     void push_back(const T& item) { emplace_back(item); }
 
@@ -112,14 +112,14 @@ private:
 
 
 template <typename T, size_t N>
-mpsc_msc_queue<T, N>::mpsc_msc_queue(){
+mpsc_queue<T, N>::mpsc_queue(){
     chunk_t* dummy = new chunk_t();
     head_chunk = dummy;
     tail_chunk.store(dummy, std::memory_order_relaxed);
 }
 
 template <typename T, size_t N>
-mpsc_msc_queue<T, N>::~mpsc_msc_queue() {
+mpsc_queue<T, N>::~mpsc_queue() {
     chunk_t* current = head_chunk;
     while (current) {
         chunk_t* next = current->next.load(std::memory_order_relaxed);
@@ -130,7 +130,7 @@ mpsc_msc_queue<T, N>::~mpsc_msc_queue() {
 
 template <typename T, size_t N>
 template<typename... args_t>
-void mpsc_msc_queue<T, N>::emplace_back(args_t&&... args) {
+void mpsc_queue<T, N>::emplace_back(args_t&&... args) {
 
     constexpr size_t HAZ_TAIL = 0;
 
@@ -184,7 +184,7 @@ void mpsc_msc_queue<T, N>::emplace_back(args_t&&... args) {
 
 
 template <typename T, size_t N>
-std::optional<T> mpsc_msc_queue<T, N>::pop_front() {
+std::optional<T> mpsc_queue<T, N>::pop_front() {
     
     while (true) {
         chunk_t* dummy = this->head_chunk;
