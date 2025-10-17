@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <coroutine>
 #include <cstddef>
@@ -10,6 +11,7 @@
 #include <thread>
 #include <stop_token>
 #include <cstring>
+#include <utility>
 #include "concurrent/mpsc_queue.h"
 #include "concurrent/spsc_object_pool.h"
 
@@ -18,7 +20,87 @@ namespace io::detail {
 using namespace seele;
 
 constexpr size_t submit_threshold = 64;
-    
+
+// Why re-implement variant?
+// Because std::variant uses non-atomic index, which may cause
+// data-race in multi-threaded scenarios.
+// Our variant implementation uses atomic index to avoid data-race.
+template<typename... Ts>
+    requires (std::is_same_v<Ts, std::decay_t<Ts>> && ...)
+class variant{
+public:
+    using index_t = uint8_t;
+
+    template<index_t N>
+    struct type_at {
+        using type = typename std::tuple_element<N, std::tuple<Ts...>>::type;
+    };
+    template<index_t N>
+    using type_at_t = typename type_at<N>::type;
+
+    template<typename T, typename... args_t>
+    variant(std::in_place_type_t<T>, args_t&&... args) {
+        static_assert((std::is_same_v<T, Ts> || ...), "Type T must be one of Ts...");
+        new (storage) T(std::forward<args_t>(args)...);
+        index.store(index_of<T>(), std::memory_order_release);
+    }
+
+    ~variant() {
+        this->visit([]<typename T>(T& val){
+            val.~T();
+        });
+    }
+
+    template<typename T>
+    static consteval index_t index_of() {
+        index_t index = 0;
+        auto _ = ((std::is_same_v<T, Ts> ? true : (index++, false)) || ...);
+        return index;
+    }
+
+
+    static consteval size_t storage_size_impl() {
+        std::array sizes = {sizeof(Ts)...};
+        return *std::ranges::max_element(sizes);
+    }
+    index_t get_index() const {
+        return index.load(std::memory_order_acquire);
+    }
+
+    template<typename T>
+    T* get_if() {
+        if (this->get_index() == index_of<T>()) {
+            return std::launder(reinterpret_cast<T*>(storage));
+        }
+        return nullptr;
+    }
+
+    template<typename invocable_t>
+    void visit(invocable_t&& invocable) {
+        index_t idx = this->get_index();
+        auto _ = ((
+            idx == index_of<Ts>() ? 
+            (
+                // [&]<typename T>(T* ptr) {
+                //     if constexpr (std::is_invocable_v<invocable_t, T&>) {
+                //         invocable(*ptr);
+                //     } else if constexpr (std::is_invocable_v<invocable_t, T>) {
+                //         invocable(std::move(*ptr));
+                //     } else {
+                //         static_assert(sizeof(T) == 0, "Visitor is not invocable with the variant alternative type");
+                //     }
+                // }(std::launder(reinterpret_cast<Ts*>(storage)))
+                invocable(*std::launder(reinterpret_cast<Ts*>(storage)))
+                , true
+            ) : false
+        ) || ...);
+    }
+
+private:
+    alignas(Ts...) std::byte storage[storage_size_impl()];
+    std::atomic<index_t> index;
+};
+
 class ctx{
 public:      
     struct request{        
@@ -28,7 +110,7 @@ public:
     struct io_usr_data;
     struct timeout_usr_data;
     struct multishot_usr_data;
-    using usr_data = std::variant<io_usr_data, timeout_usr_data>;
+    using usr_data = variant<io_usr_data, timeout_usr_data>;
 
     struct io_usr_data{
         std::coroutine_handle<> handle;
@@ -127,9 +209,9 @@ private:
     std::stop_source stop_src;
     std::jthread worker_thread; 
     std::atomic<bool> is_worker_running;
-    std::atomic<size_t> pending_req_count;
+    alignas(64) std::atomic<size_t> pending_req_count;
 
-    std::counting_semaphore<> unp_sem;
+    alignas(64) std::counting_semaphore<> unp_sem;
     concurrent::mpsc_queue<request> unprocessed_requests;
 
     concurrent::spsc_object_pool<usr_data> usr_data_pool;

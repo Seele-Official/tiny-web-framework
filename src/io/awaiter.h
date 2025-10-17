@@ -61,10 +61,9 @@ namespace io::awaiter {
             static_cast<derived*>(this)->setup(sqe);
             sqe->user_data = std::bit_cast<std::uintptr_t>(
                 detail::ctx::get_instance().new_usr_data(
-                    detail::ctx::io_usr_data{
-                        this->handle,
-                        &this->io_ret
-                    }
+                    std::in_place_type<detail::ctx::io_usr_data>,
+                    this->handle,
+                    &this->io_ret
                 )
             );
             return 1; // return the number of sqe written
@@ -285,9 +284,8 @@ namespace io::awaiter {
 
             timeout_sqe->user_data = std::bit_cast<std::uintptr_t>(
                 detail::ctx::get_instance().new_usr_data(
-                    detail::ctx::timeout_usr_data{
-                        io_data
-                    }
+                    std::in_place_type<detail::ctx::timeout_usr_data>,
+                    io_data
                 )
             );
             return 2;

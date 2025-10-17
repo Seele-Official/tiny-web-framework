@@ -67,7 +67,7 @@ void ctx::handle_cqes(io_uring_cqe* cqe) {
     io_uring_for_each_cqe(&ring, head, cqe) {
         count++;
         auto* data = std::bit_cast<usr_data*>(cqe->user_data);
-        std::visit(
+        data->visit(
             [&]<typename T>(T& usr_data) {
                 if constexpr (std::is_same_v<T, io_usr_data>) {
                     usr_data.io_ret->store(cqe->res, std::memory_order_release); // Copy the cqe result to the user data
@@ -80,7 +80,7 @@ void ctx::handle_cqes(io_uring_cqe* cqe) {
                         case -ENOENT:
                             break; // Timeout or canceled or no entry, skip this cqe
                         default:{
-                            auto* io_data = std::get_if<io_usr_data>(usr_data.io_data);
+                            auto* io_data = usr_data.io_data->template get_if<io_usr_data>();
                             std::println("Timeout req is broken, handle {}, {}", *((void **)&io_data->handle), cqe->res);
                             std::terminate();
                         }
@@ -88,8 +88,7 @@ void ctx::handle_cqes(io_uring_cqe* cqe) {
                 } else {
                     log::async::error("Unknown user data type in cqe");
                 }
-            },
-            *data
+            }
         );
         this->usr_data_pool.deallocate(data); // Clean up the user data
     }
