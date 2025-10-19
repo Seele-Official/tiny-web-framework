@@ -1,6 +1,5 @@
 #include <atomic>
 #include <cerrno>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -8,11 +7,10 @@
 #include <optional>
 #include <print>
 #include <thread>
-#include <variant>
 
 #include "coro/thread.h"
 #include "io/ctx.h"
-#include "log.h"
+#include "log/log.h"
 
 namespace io::detail {
     

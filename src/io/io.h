@@ -109,23 +109,6 @@ private:
     int m_fd{-1};
 };
 
-inline int64_t get_file_size(const fd& fd_w) {
-    struct stat st;
-
-    if(fstat(fd_w.get(), &st) < 0) {
-        return -1;
-    }
-    if (S_ISBLK(st.st_mode)) {
-        int64_t bytes;
-        if (ioctl(fd_w.get(), BLKGETSIZE64, &bytes) != 0) {
-            return -1;
-        }
-        return bytes;
-    } else if (S_ISREG(st.st_mode))
-        return st.st_size;
-
-    return -1;
-}
 
 class mmap{
 public:

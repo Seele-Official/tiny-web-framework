@@ -1,8 +1,9 @@
 #include <cstdint>
 #include <csignal>
+#include <system_error>
 #include <utility>
 #include <filesystem>
-#include "log.h"
+#include "log/log.h"
 
 #include "web/loop.h"
 #include "web/mime.h"
@@ -132,7 +133,19 @@ void add_static_file_router(){
     for (const auto& entry : std::filesystem::recursive_directory_iterator(root)) {
         if (entry.is_regular_file()) {
             auto full_path = std::filesystem::absolute(entry.path());
-            
+
+            std::error_code ec;
+
+            auto file_size = std::filesystem::file_size(full_path, ec);
+
+            if (ec) {
+                std::println("Failed to get file size for {}: {}", full_path.string(), ec.message());
+                std::terminate();
+            }
+            if (file_size == 0) {
+                std::println("File is empty: {}", full_path.string());
+                continue;
+            }            
 
             auto fd  = io::fd::open_file(full_path, O_RDONLY);
 
@@ -141,16 +154,6 @@ void add_static_file_router(){
                 std::terminate();
             }
 
-            int64_t file_size = io::get_file_size(fd);
-            if (file_size < 0) {
-                std::println("Failed to get file size for {}", full_path.string());
-                std::terminate();
-            }
-            if (file_size == 0) {
-                std::println("File is empty: {}", full_path.string());
-                continue;
-            }
-            
 
             std::string content_type = "application/octet-stream";
             std::string ext = full_path.extension().string();

@@ -2,7 +2,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "log.h"
+#include "log/log.h"
 #include "web/response.h"
 #include "web/routing.h"
 

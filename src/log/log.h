@@ -1,49 +1,34 @@
 #pragma once
 #include <cstddef>
-#include <iostream>
-#include <fstream>
 #include <memory>
 #include <mutex>
 #include <format>
-#include <ostream>
-#include <source_location>
-#include <functional>
-#include <string_view>
 #include <print>
 #include <thread>
 #include <tuple>
-#include <type_traits>
 #include <utility>
-#include <chrono>
 #include <format>
 #include <vector>
-#include "meta.h"
-#include "concurrent/mpsc_ringbuffer.h"
-namespace seele::log{
-using namespace std::literals;
-enum class level{
-    error,
-    warn,
-    info,
-    debug,
-    trace,
-};
 
-constexpr level log_level = level::info;
-constexpr size_t packet_batch_size = 256;
+#include "log/sink.h"
+#include "log/common.h"
+
+#include "concurrent/mpsc_ringbuffer.h"
+
+namespace seele::log{
 
 namespace detail {
 
 class packet{
 public:
     using deletor_signature = void(void*);
-    using logfunc_signature = void(void*);
+    using fmtfunc_signature = void(void*, sink::basic&);
     packet() = default;
-    packet(void* ctx, logfunc_signature* logfunc, deletor_signature* deletor)
-        : ctx{ctx}, logfunc{logfunc}, deletor{deletor} {}
+    packet(void* ctx, fmtfunc_signature* fmtfunc, deletor_signature* deletor)
+        : ctx{ctx}, fmtfunc{fmtfunc}, deletor{deletor} {}
     packet(const packet&) = delete;
     packet(packet&& o) 
-        : ctx{std::exchange(o.ctx, nullptr)}, logfunc{std::exchange(o.logfunc, nullptr)}, deletor{std::exchange(o.deletor, nullptr)} {}
+        : ctx{std::exchange(o.ctx, nullptr)}, fmtfunc{std::exchange(o.fmtfunc, nullptr)}, deletor{std::exchange(o.deletor, nullptr)} {}
     packet& operator=(const packet&) = delete;
     packet& operator=(packet&& o) {
         if (this != &o) {
@@ -51,7 +36,7 @@ public:
                 deletor(ctx);
             }
             ctx = std::exchange(o.ctx, nullptr);
-            logfunc = std::exchange(o.logfunc, nullptr);
+            fmtfunc = std::exchange(o.fmtfunc, nullptr);
             deletor = std::exchange(o.deletor, nullptr);
         }
         return *this;
@@ -62,21 +47,44 @@ public:
             deletor(ctx);
         }
     }
-
     template<level lvl, typename... args_t>
-    static packet make(args_t&&... args);
-
-    void log() const {
-        if (logfunc && ctx) {
-            logfunc(ctx);
-        }
+    static packet make(system_clock::time_point time, args_t&&... args){
+        return make_helper<lvl>(time, std::forward<args_t>(args)...);
     }
 
+    void to(sink::basic& out) const {
+        if (fmtfunc && ctx) {
+            fmtfunc(ctx, out);
+        }
+    }
 private:    
+    template<level lvl, typename... args_t>
+    static packet make_helper(args_t&&... args);
+
     void*              ctx{nullptr};
-    logfunc_signature* logfunc{nullptr};
+    fmtfunc_signature* fmtfunc{nullptr};
     deletor_signature* deletor{nullptr};
 };
+
+
+template<level lvl, typename... args_t>
+packet packet::make_helper(args_t&&... args){
+    using ctx_t = decltype(std::tuple(std::forward<args_t>(args)...));
+    auto* ctx = new ctx_t(std::forward<args_t>(args)...);
+    return packet{
+        ctx,
+        [](void* ctx, sink::basic& out){
+            auto* d = static_cast<ctx_t*>(ctx);
+            [&]<size_t... I>(std::index_sequence<I...>){
+                out.log<lvl>(std::get<I>(*d)...);
+            }(std::make_index_sequence<sizeof...(args_t)>{});
+        },
+        [](void* ctx){
+            delete static_cast<ctx_t*>(ctx);
+        }
+    };
+}
+
 
 class logger{
 public:
@@ -87,15 +95,12 @@ public:
     logger& operator=(logger&&) = delete;
 
     ~logger() {
+        using namespace std::chrono_literals;
         while (this->ringbuffer.size() > 0) {
             std::this_thread::sleep_for(10ms);
         }
         this->worker_thread.request_stop();
-        this->sem.release();        
-        
-        if (output != &std::cout) {
-            delete output;
-        }
+        this->sem.release(); 
     }
 
     static auto& get_instance() {
@@ -103,9 +108,23 @@ public:
         return inst;
     }
 
-    void set_output(std::ostream* os) {
-        std::lock_guard lock(this->mutex);
-        this->output = os;
+    void add_sink(std::unique_ptr<sink::basic> s) {
+        std::lock_guard lock{mutex};
+        sinks.push_back(std::move(s));
+    }
+
+    void add_sinks(std::vector<std::unique_ptr<sink::basic>> ss) {
+        std::lock_guard lock{mutex};
+        for (auto& s : ss) {
+            sinks.push_back(std::move(s));
+        }
+    }
+
+    void log(const packet& p) {
+        std::lock_guard lock{mutex};
+        for (auto& sink : sinks) {
+            p.to(*sink);
+        }
     }
 
     bool submit_packets(std::vector<packet>&& pkts) {
@@ -120,10 +139,14 @@ private:
         while(sem.acquire(), !st.stop_requested()){
             auto pkts = ringbuffer.unsafe_pop_front();
             for (auto& p : pkts) {
-                p.log();
+                for (auto& sink : sinks) {
+                    p.to(*sink);
+                }
             }
         }
     }
+    std::mutex    mutex{};    
+    std::vector<std::unique_ptr<sink::basic>> sinks{};
 
     alignas(64) std::counting_semaphore<> sem{0};
     concurrent::mpsc_ringbuffer<std::vector<packet>, 1024> ringbuffer{};
@@ -132,34 +155,8 @@ private:
             this->loop(st);
         }
     };
-public:
-    std::mutex    mutex{};    
-    std::ostream* output{&std::cout};
 };
 
-template<level lvl, typename... args_t>
-void log(
-    logger&                               logger,
-    std::source_location                  loc, 
-    std::chrono::system_clock::time_point time, 
-    std::format_string<args_t...>         fmt, 
-    args_t&&...                           args
-){
-    if constexpr (lvl <= log_level) {
-        std::lock_guard lock(logger.mutex);
-        std::println(
-            *logger.output,
-            "[{}] [{:%Y-%m-%d %H:%M:%S}]: `{}` at {}:{}:{}",
-            meta::enum_name<lvl>(), 
-            time,
-            std::format(
-                fmt, std::forward<args_t>(args)...
-            ),
-            loc.file_name(), loc.line(), loc.column()
-        );
-        
-    }
-}
 
 class tls_t{
 public:
@@ -196,55 +193,20 @@ inline auto& tls(){
     return e;
 }
 
-template<level lvl, typename... args_t>
-packet packet::make(args_t&&... args){
-    using ctx_t = decltype(std::tuple(std::forward<args_t>(args)...));
-    auto* ctx = new ctx_t(std::forward<args_t>(args)...);
-    return packet{
-        ctx,
-        [](void* ctx){
-            auto* d = static_cast<ctx_t*>(ctx);
-            [&]<size_t... I>(std::index_sequence<I...>){
-                detail::log<lvl>(
-                    *tls().logger,
-                    std::get<I>(*d)...
-                );
-            }(std::make_index_sequence<sizeof...(args_t)>{});
-        },
-        [](void* ctx){
-            delete static_cast<ctx_t*>(ctx);
-        }
-    };
-}
+
 } //namespace detail
 
-inline void set_output_file(std::string_view filename) {
-    detail::logger::get_instance()->set_output(new std::ofstream{filename.data(), std::ios::app});
+inline void add_sink(std::unique_ptr<sink::basic> s) {
+    detail::logger::get_instance()->add_sink(std::move(s));
 }
-
-
-template <typename... args_t>
-struct basic_format_string_wrapper {
-    template<typename T>
-	    requires std::convertible_to<const T&, std::string_view>
-	consteval basic_format_string_wrapper(const T& s, 
-                    std::source_location loc = std::source_location::current()) : loc{loc}, fmt{s} {}
-    std::source_location          loc;
-    std::format_string<args_t...> fmt;
-};
 
 
 namespace sync {
-template <typename... args_t>
-using format_string_wrapper = basic_format_string_wrapper<std::type_identity_t<args_t>...>;
-
 template<level lvl, typename... args_t>
 void log(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
-    if constexpr (lvl <= log_level) {
-        auto [loc, fmt] = fmt_w;
-        detail::log<lvl>(
-            *detail::logger::get_instance(),
-            loc, std::chrono::system_clock::now(), fmt, std::forward<args_t>(args)...
+    if constexpr (lvl <= log::max_level) {
+        detail::logger::get_instance()->log(
+            detail::packet::make<lvl>(system_clock::now(), fmt_w, std::forward<args_t>(args)...)
         );
     }
 }
@@ -277,16 +239,12 @@ void trace(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
 
 
 namespace async{
-template <typename... args_t>
-using format_string_wrapper = basic_format_string_wrapper<std::unwrap_ref_decay_t<std::type_identity_t<args_t>>&...>;
-
 
 template<level lvl, typename... args_t>
 void log(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
-    if constexpr (lvl <= log_level) {
-        auto [loc, fmt] = fmt_w;
+    if constexpr (lvl <= log::max_level) {
         detail::tls().push(
-            detail::packet::make<lvl>(loc, std::chrono::system_clock::now(), fmt, std::forward<args_t>(args)...)
+            detail::packet::make<lvl>(system_clock::now(), fmt_w, std::forward<args_t>(args)...)
         );
     }
 }
