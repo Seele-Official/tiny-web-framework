@@ -11,10 +11,9 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/Seele-Official/tiny-web-framework
     GIT_TAG        main
 )
+
 FetchContent_MakeAvailable(web_framework)
 
-file(GLOB_RECURSE EXAMPLE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
-
-add_executable(example ${EXAMPLE_SOURCES})
+add_executable(example example.cpp)
 
 target_link_libraries(example PRIVATE web_framework)
