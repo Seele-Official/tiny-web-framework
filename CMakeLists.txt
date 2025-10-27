@@ -75,18 +75,3 @@ else()
 endif()
 
 
-
-option(BUILD_EXAMPLE "Build the example targets" ON)
-
-if(BUILD_EXAMPLE)
-    message(STATUS "Examples are enabled. Configuring example targets...")
-
-    file(GLOB_RECURSE EXAMPLE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/example/*.cpp")
-
-    add_executable(example ${EXAMPLE_SOURCES})
-
-    target_link_libraries(example PRIVATE web_framework)
-else()
-  message(STATUS "Examples are disabled.")
-endif()
-
