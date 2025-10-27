@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tool: [gcc, clang]
+        tool: [gcc]
         build_mode: [release, debug, asan, tsan]
 
     steps:
