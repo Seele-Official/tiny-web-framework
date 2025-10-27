@@ -62,11 +62,12 @@ struct v4{
         std::string ip_str = addr.substr(0, pos);
         std::string port_str = addr.substr(pos + 1);
 
-        auto ip_parts = std::views::split(ip_str, '.')
+        auto ip_parts_view = std::views::split(ip_str, '.')
             | std::views::transform([](auto&& rng){
                 return std::string_view(rng.begin(), rng.end());
-            })
-            | std::ranges::to<std::vector<std::string_view>>();
+            });
+
+        std::vector<std::string_view> ip_parts{ip_parts_view.begin(), ip_parts_view.end()};
 
         if (ip_parts.size() != 4) return v4{};
         uint32_t ip = 0;

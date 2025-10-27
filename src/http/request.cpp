@@ -201,6 +201,7 @@ parser::parse_task parser::task(parser* p) {
             });
 
         std::vector<std::string_view> line_parts{line_parts_view.begin(), line_parts_view.end()};
+        
         if (line_parts.size() != 3) {
             instance->fail_parse();
             goto start_over;
