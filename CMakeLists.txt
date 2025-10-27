@@ -53,7 +53,7 @@ endif()
 
 
 if(BUILD_TESTING)
-    message(STATUS "Tests are enabled. Configuring test targets...")
+    message(STATUS "Tests of web_framework are enabled. Configuring test targets...")
 
     enable_testing()
 
@@ -74,5 +74,5 @@ if(BUILD_TESTING)
     add_test(NAME CppUnitTests COMMAND unit_test)
 
 else()
-    message(STATUS "Tests are disabled.")
+    message(STATUS "Tests of web_framework are disabled.")
 endif()
