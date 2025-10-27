@@ -28,7 +28,7 @@ std::atomic<int> CounterObj::dtor{0};
 std::atomic<int> CounterObj::move_ctor{0};
 std::atomic<int> CounterObj::copy_ctor{0};
 
-suite<"mpsc ringbuffer"> ringbuffer_suite = [] {
+suite<"mpsc ringbuffer"> _ = [] {
     "empty pop"_test = [] {
         mpsc_ringbuffer<int, 8> q;
         expect(!q.pop_front().has_value());

@@ -71,7 +71,11 @@ public:
         return *this;
     }
 
-    virtual ~fmt_ostream() {
+    ~fmt_ostream() {
+        if (current > begin) {
+            std::println("log: unflushed data detected in fmt_ostream destructor");
+            std::terminate();
+        }
         delete[] begin;
     }
     
@@ -112,10 +116,9 @@ private:
 
 class basic : public detail::fmt_ostream {
 public:
-    explicit basic() = default;
-    explicit basic(size_t size) : detail::fmt_ostream(size) {}
+    using detail::fmt_ostream::fmt_ostream;
 
-    ~basic() override = default;
+    virtual ~basic() = default;
 
     template<level lvl, typename... args_t>
     void log(system_clock::time_point time, format_string_wrapper<args_t...> fmt_w, args_t&&... args){
@@ -139,31 +142,32 @@ private:
     std::mutex mutex{};
 };
 
-class cout : public basic {
+class cout final : public basic {
 public:
     cout() = default;
-    ~cout() override {
+    ~cout() final {
         this->flush();
     }
 protected:
-    void do_flush(const char* data, size_t count) override {
+    void do_flush(const char* data, size_t count) final {
+        
         std::cout.write(data, count);
     }
 };
 
-class cerr : public basic {
+class cerr final : public basic {
 public:
     cerr() = default;
-    ~cerr() override {
+    ~cerr() final {
         this->flush();
     }
 protected:
-    void do_flush(const char* data, size_t count) override {
+    void do_flush(const char* data, size_t count) final {
         std::cerr.write(data, count);
     }
 };
 
-class file : public basic {
+class file final : public basic {
 public:
     file(std::string_view p = "server.log", size_t s = 10 * 1024 * 1024) // default 10MB
         : max_size(s), path(p) 
@@ -171,7 +175,7 @@ public:
         this->open_current_file();
     }
 
-    ~file() override {
+    ~file() final {
         this->flush();
         std::fclose(this->file_ptr);
     }
@@ -182,7 +186,7 @@ public:
     file& operator=(file&&) = delete;
 
 protected:
-    void do_flush(const char* data, size_t count) override {
+    void do_flush(const char* data, size_t count) final {
         this->size_written += std::fwrite(data, 1, count, this->file_ptr);
         if (this->size_written > max_size) {
             roll_file();
@@ -246,23 +250,24 @@ private:
 
     void roll_file() {
         if (this->file_ptr) {
-            std::fclose(file_ptr);
-            file_ptr = nullptr;
+            std::fclose(this->file_ptr);
+            this->file_ptr = nullptr;
         }
 
-        number++;
+        ++this->number;
 
-        auto f = fopen(std::format("{}.{}", path, number));
+        auto f = fopen(std::format("{}.{}", this->path, this->number));
         if (!f) {
-            std::println("Error: Failed to open log file: {}", std::format("{}.{}", path, number));
+            std::println("Error: Failed to open log file: {}", std::format("{}.{}", this->path, this->number));
             std::terminate();
         }
-        size_written = 0;
+        this->size_written = 0;
+        this->file_ptr     = f;
     }
 
 
 
-    std::FILE* file_ptr{nullptr};
+    std::FILE*  file_ptr{nullptr};
     size_t      max_size{};
     size_t      size_written{0};
     size_t      number{0};

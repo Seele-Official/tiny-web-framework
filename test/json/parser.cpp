@@ -3,7 +3,7 @@
 #include <string_view>
 #include <variant>
 #include "json/json.h"
-
+namespace  {
 using namespace boost::ut;
 
 suite<"Data Types"> data_types = [] {
@@ -194,3 +194,5 @@ suite<"Nested Structures"> nested_structures = [] {
         expect(obj->get().at("null_value") == Json::json(Json::null{}));
     };
 };
+    
+} //namespace
