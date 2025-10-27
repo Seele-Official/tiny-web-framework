@@ -210,12 +210,27 @@ private:
 
     void open_current_file() {
         for (auto i : std::views::iota(0uz)) {
+            
             auto candidate = std::format("{}.{}", path, i);
-
             auto candidate_path = std::filesystem::path(candidate);
 
             std::error_code ec;
-            if (!std::filesystem::exists(candidate_path, ec)) {
+
+            if (!std::filesystem::exists(candidate_path, ec)) {       
+                auto parent_path = candidate_path.parent_path();
+                if (!std::filesystem::exists(parent_path, ec)) {
+                    std::filesystem::create_directories(parent_path, ec);
+                    if (ec) {
+                        std::println("Error: Failed to create directories for {}: {}", candidate, ec.message());
+                        std::terminate();
+                    }
+                }
+
+                if (ec) {
+                    std::println("Error: Failed to check existence of {}: {}", parent_path.string(), ec.message());
+                    std::terminate();
+                }
+
                 if (auto f = fopen(candidate); f) {
                     this->file_ptr     = f;
                     this->number       = i;
@@ -225,6 +240,11 @@ private:
                     std::println("Error: Failed to open log file: {}", candidate);
                     std::terminate();
                 }
+            }
+
+            if (ec) {
+                std::println("Error: Failed to check existence of {}: {}", candidate_path.string(), ec.message());
+                std::terminate();
             }
 
             auto current_size = std::filesystem::file_size(candidate_path, ec);
