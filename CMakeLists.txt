@@ -8,9 +8,21 @@ set(CMAKE_CXX_STANDARD_REQUIRED YES)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -fno-exceptions -O3")
-# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -fno-exceptions -O0 -g -fsanitize=address,leak -fno-omit-frame-pointer")
-# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -fno-exceptions -O0 -g -fsanitize=thread")
+set(CMAKE_CXX_FLAGS_BASE "-Wall -Wextra -fno-exceptions -fno-rtti")
+set(BUILD_MODE "release" CACHE STRING "Build mode (release, debug, asan, tsan)")
+
+if (BUILD_MODE STREQUAL "release")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_BASE} -O3")
+elseif (BUILD_MODE STREQUAL "debug")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_BASE} -O0 -g")
+elseif (BUILD_MODE STREQUAL "asan")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_BASE} -O0 -g -fsanitize=address,leak -fno-omit-frame-pointer")
+elseif (BUILD_MODE STREQUAL "tsan")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_BASE} -O0 -g -fsanitize=thread")
+endif()
+
+message(STATUS "Build mode: ${BUILD_MODE}")
+
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 
 

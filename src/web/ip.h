@@ -64,7 +64,7 @@ struct v4{
 
         auto ip_parts = std::views::split(ip_str, '.')
             | std::views::transform([](auto&& rng){
-                return std::string_view(rng);
+                return std::string_view(rng.begin(), rng.end());
             })
             | std::ranges::to<std::vector<std::string_view>>();
 

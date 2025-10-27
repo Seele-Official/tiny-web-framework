@@ -1,0 +1,58 @@
+name: CMake CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    name: Build and test (${{ matrix.compiler }} / ${{ matrix.build_mode }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tool: [gcc, clang]
+        build_mode: [release, debug, asan, tsan]
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set build-output-dir
+      id: strings
+      run: echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+
+    - name: Install deps and required compilers
+      run: |
+        sudo apt update
+        sudo apt install cmake liburing-dev g++-14 clang-20
+    - name: Set compiler variables
+      run: |
+        if [ "${{ matrix.tool }}" = "gcc" ]; then
+          echo "CXX=g++-14" >> $GITHUB_ENV
+        else
+          echo "CXX=clang++-20" >> $GITHUB_ENV
+        fi
+
+    - name: Configure CMake
+      run: |
+        set -euo pipefail
+        BUILD_DIR=${{ steps.strings.outputs.build-output-dir }}
+        CMDCMD=(cmake -B "$BUILD_DIR" -S "${{ github.workspace }}" -DCMAKE_CXX_COMPILER="$CXX" -DBUILD_MODE=${{ matrix.build_mode}})
+        echo "Running: ${CMDCMD[*]}"
+        "${CMDCMD[@]}"
+
+    - name: Build
+      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} -- -j$(nproc)
+
+    - name: Run tests
+      run: ctest --test-dir ${{ steps.strings.outputs.build-output-dir }} --output-on-failure
+
+    - name: Upload ctest results (JUnit)
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ctest-results-${{ matrix.compiler }}-${{ matrix.build_mode }}
+        path: ${{ steps.strings.outputs.build-output-dir }}/Testing || true

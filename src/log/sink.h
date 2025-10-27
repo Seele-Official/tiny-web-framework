@@ -138,7 +138,7 @@ public:
         }
     }
 private:
-    level      level{max_level};
+    log::level level{max_level};
     std::mutex mutex{};
 };
 

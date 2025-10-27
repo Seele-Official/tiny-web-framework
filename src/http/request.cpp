@@ -194,14 +194,13 @@ parser::parse_task parser::task(parser* p) {
         while (!(line_opt = instance->get_line())) {
             instance->data_view = co_await wait_message{};
         }
-
-        auto line_parts = line_opt.value()
+        auto line_parts_view = line_opt.value()
             | std::views::split(SP)
-            | std::views::transform([](auto part){
-                return std::string_view(part);
-            })
-            | std::ranges::to<std::vector<std::string_view>>();
+            | std::views::transform([](auto&& rng) {
+                return std::string_view(rng);
+            });
 
+        std::vector<std::string_view> line_parts{line_parts_view.begin(), line_parts_view.end()};
         if (line_parts.size() != 3) {
             instance->fail_parse();
             goto start_over;
