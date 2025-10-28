@@ -24,6 +24,14 @@ http::response::msg make_success_msg(std::string&& content_type, std::string&& b
 }
 
 int main(){
+
+    // Initialize the thread pool
+    if (!coro::thread::init(4)) {
+        std::println("Failed to initialize thread pool");
+        return 1;
+    }
+
+
     // Configure the logging system
     log::add_sink(
         std::make_unique<log::sink::file>("app.log")

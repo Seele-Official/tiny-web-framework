@@ -1,9 +1,11 @@
 #include "coro/thread.h"
+#include <exception>
+#include <print>
 
 namespace coro::thread::detail {
 
 pool& pool::get_instance(){
-    static pool instance{4};
+    static pool instance{};
     return instance;
 } 
 
@@ -16,13 +18,19 @@ void pool::worker(std::stop_token st){
         h->resume();
     }
 }
-pool::pool(size_t worker_count) : sem{0} {
+bool pool::init(size_t worker_count) {
+    static bool flag = false;
+    if (flag) {
+        return false;
+    }
     workers.reserve(worker_count);
     for(size_t i = 0; i < worker_count; ++i){
         workers.emplace_back([this](std::stop_token st){
             this->worker(st);
         });
     }
+    flag = true;
+    return true;
 }
 
 pool::~pool() {

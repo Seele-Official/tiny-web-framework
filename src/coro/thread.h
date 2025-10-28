@@ -1,6 +1,4 @@
 #pragma once
-#include <atomic>
-#include <climits>
 #include <cstddef>
 #include <semaphore>
 #include <thread>
@@ -14,10 +12,12 @@ class pool {
 public:
     static pool& get_instance();
 
-    auto submit(std::coroutine_handle<> h){
+    void submit(std::coroutine_handle<> h){
         tasks.emplace_back(h);
         sem.release();
     }
+
+    bool init(size_t worker_count);
 
     pool(const pool&) = delete;        
     pool(pool&&) = delete;
@@ -27,19 +27,24 @@ private:
 
     void worker(std::stop_token st);
 
-    pool(size_t worker_count);        
+    pool() = default;        
     ~pool();  
 
-    concurrent::mpmc_queue<std::coroutine_handle<>> tasks;        
-    std::vector<std::jthread> workers;
-    std::counting_semaphore<> sem;
+    concurrent::mpmc_queue<std::coroutine_handle<>> tasks{};        
+    std::vector<std::jthread> workers{};
+    std::counting_semaphore<> sem{0};
 };
 
 }
 
-inline auto dispatch(std::coroutine_handle<> handle) {
+inline void dispatch(std::coroutine_handle<> handle) {
     detail::pool::get_instance().submit(handle);
-}    
+}
+
+inline bool init(size_t worker_count) {
+    return detail::pool::get_instance().init(worker_count);
+}
+
 
 struct dispatch_awaiter{
     bool await_ready() { return false; }
