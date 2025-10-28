@@ -3,7 +3,7 @@
 #include <thread>
 #include <utility>
 
-namespace seele::coro{
+namespace coro{
 // final_suspend suspend_never , so automatically destroyed
 struct simple_task{
     struct promise_type{

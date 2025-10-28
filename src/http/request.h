@@ -11,7 +11,6 @@
 
 
 namespace http::request {
-using namespace seele;
 
 enum class method {
     GET,

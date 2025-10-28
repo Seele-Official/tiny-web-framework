@@ -1,6 +1,6 @@
 #include "coro/thread.h"
 
-namespace seele::coro::thread::detail {
+namespace coro::thread::detail {
 
 pool& pool::get_instance(){
     static pool instance{4};

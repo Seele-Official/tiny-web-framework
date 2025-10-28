@@ -15,7 +15,7 @@ suite<"Logging Sink Tests"> _ = [] {
         constexpr size_t times = 1000;
         
         {
-            seele::log::sink::file file_sink(filename, 1024); // 1KB max size for testing
+            log::sink::file file_sink(filename, 1024); // 1KB max size for testing
 
             for (auto _ : std::views::iota(0uz, times)) {
                 file_sink.fmt_to("{}", msg);

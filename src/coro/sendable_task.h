@@ -5,7 +5,7 @@
 #include <utility>
 
 
-namespace seele::coro{
+namespace coro{
 
 
 template <typename return_t, typename message_t>

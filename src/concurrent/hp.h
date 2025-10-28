@@ -7,7 +7,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <vector>
-namespace seele::concurrent {
+namespace concurrent {
     
 namespace hp {
     constexpr size_t max_hazard_count = 3;
@@ -113,4 +113,4 @@ private:
 
 
 
-} // namespace seele::concurrent
+} // namespace concurrent

@@ -15,7 +15,6 @@ using namespace std::literals;
 
 using namespace boost::ut;
 using namespace web;
-using namespace seele;
 suite<"static routing"> _ = []{
     "get"_test = []{
 

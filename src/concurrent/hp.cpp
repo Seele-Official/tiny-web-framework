@@ -3,7 +3,7 @@
 #include <algorithm>
 #include "concurrent/hp.h"
 #include "log/log.h"
-namespace seele::concurrent {
+namespace concurrent {
 
 namespace detail {
 
@@ -137,4 +137,4 @@ void hazard_manager::clear_all(){
 
 
 
-} // namespace seele::concurrent
+} // namespace concurrent

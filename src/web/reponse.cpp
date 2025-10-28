@@ -10,7 +10,6 @@
 
 
 namespace web::response {
-using namespace seele;
 
 
 task msg(const http::response::msg& msg){ 

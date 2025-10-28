@@ -7,7 +7,7 @@
 #include <coroutine>
 #include <vector>
 #include "concurrent/mpmc_queue.h"
-namespace seele::coro::thread {
+namespace coro::thread {
     
 namespace detail {
 class pool {

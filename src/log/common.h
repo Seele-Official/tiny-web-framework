@@ -3,7 +3,7 @@
 #include <format>
 #include <source_location>
 #include <concepts>
-namespace seele::log{
+namespace log{
 
 enum class level{
     error,

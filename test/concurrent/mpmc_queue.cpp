@@ -6,7 +6,7 @@
 namespace {
 
 using namespace boost::ut;
-using namespace seele::concurrent;
+using namespace concurrent;
 
 // A helper class to track object lifetimes
 struct CounterObj {

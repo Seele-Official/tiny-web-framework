@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <ranges>
 #include <string_view>
-namespace seele::meta {
+namespace meta {
 template <auto T>
 consteval std::string_view type_name() {
     std::string_view name = 
@@ -16,10 +16,10 @@ consteval std::string_view type_name() {
         #endif
     
 #if defined(__clang__)
-    constexpr std::string_view prefix = "std::string_view seele::meta::type_name() [T = ";
+    constexpr std::string_view prefix = "std::string_view meta::type_name() [T = ";
     constexpr std::string_view suffix = "]";
 #elif defined(__GNUC__)
-    constexpr std::string_view prefix = "consteval std::string_view seele::meta::type_name() [with auto T = ";
+    constexpr std::string_view prefix = "consteval std::string_view meta::type_name() [with auto T = ";
     constexpr std::string_view suffix = "; std::string_view = std::basic_string_view<char>]";
 #endif
     name.remove_prefix(prefix.size());
@@ -36,10 +36,10 @@ consteval std::string_view type_name() {
         #endif
     
 #if defined(__clang__)
-    constexpr std::string_view prefix = "std::string_view seele::meta::type_name() [T = ";
+    constexpr std::string_view prefix = "std::string_view meta::type_name() [T = ";
     constexpr std::string_view suffix = "]";
 #elif defined(__GNUC__)
-    constexpr std::string_view prefix = "consteval std::string_view seele::meta::type_name() [with T = ";
+    constexpr std::string_view prefix = "consteval std::string_view meta::type_name() [with T = ";
     constexpr std::string_view suffix = "; std::string_view = std::basic_string_view<char>]";
 #endif
     name.remove_prefix(prefix.size());

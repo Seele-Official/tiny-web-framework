@@ -3,7 +3,7 @@
 #include <thread>
 #include <utility>
 
-namespace seele::coro{
+namespace coro{
 template <typename return_t>
 class lazy_task{
 public:

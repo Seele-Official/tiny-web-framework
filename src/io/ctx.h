@@ -17,7 +17,6 @@
 
 
 namespace io::detail {
-using namespace seele;
 
 constexpr size_t submit_threshold = 64;
 

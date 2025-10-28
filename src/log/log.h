@@ -15,7 +15,7 @@
 
 #include "concurrent/mpsc_ringbuffer.h"
 
-namespace seele::log{
+namespace log{
 
 namespace detail {
 

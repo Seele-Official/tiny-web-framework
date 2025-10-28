@@ -5,7 +5,7 @@
 #include <print>
 #include <vector>
 
-namespace seele::concurrent {
+namespace concurrent {
 
 // only for single producer single consumer use case
 template <typename T>

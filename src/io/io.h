@@ -26,7 +26,6 @@
 
 namespace io {
     
-using namespace seele;
 
 inline void run() {
     detail::ctx::get_instance().run();

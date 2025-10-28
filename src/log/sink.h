@@ -14,7 +14,7 @@
 #include "common.h"
 #include "meta.h"
 
-namespace seele::log::sink {
+namespace log::sink {
 
 
 namespace detail {
@@ -210,7 +210,7 @@ private:
 
     void open_current_file() {
         for (auto i : std::views::iota(0uz)) {
-            
+
             auto candidate = std::format("{}.{}", path, i);
             auto candidate_path = std::filesystem::path(candidate);
 

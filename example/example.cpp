@@ -24,7 +24,6 @@ http::response::msg make_success_msg(std::string&& content_type, std::string&& b
 }
 
 int main(){
-    using namespace seele;
     // Configure the logging system
     log::add_sink(
         std::make_unique<log::sink::file>("app.log")

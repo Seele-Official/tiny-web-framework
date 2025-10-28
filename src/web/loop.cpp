@@ -15,7 +15,6 @@
 #include "web/routing.h"
 
 namespace web::loop {
-using namespace seele;
 using namespace std::literals;
 coro::simple_task async_handle_connection(int fd, ip::v4 a) {
     io::fd fd_w(fd);

@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <utility>
 #include "concurrent/hp.h" 
-namespace seele::concurrent {
+namespace concurrent {
 
 template<typename T, size_t MAX_NODES = 64>
 struct mpmc_chunk{            

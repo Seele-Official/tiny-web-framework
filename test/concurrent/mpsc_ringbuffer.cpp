@@ -9,7 +9,7 @@
 namespace {
 
 using namespace boost::ut;
-using namespace seele::concurrent;
+using namespace concurrent;
 
 struct CounterObj {
     static std::atomic<int> ctor;

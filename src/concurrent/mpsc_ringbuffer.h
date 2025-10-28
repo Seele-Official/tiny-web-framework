@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <optional>
 
-namespace seele::concurrent {
+namespace concurrent {
 
 template <typename T, size_t N = 64>
 class mpsc_ringbuffer{
