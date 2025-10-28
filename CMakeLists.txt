@@ -5,17 +5,17 @@ project(web_framework LANGUAGES CXX)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(MY_CMAKE_CXX_FLAGS_BASE "-Wall -Wextra -fno-exceptions -fno-rtti")
+set(MY_CMAKE_CXX_FLAGS_BASE -Wall -Wextra -fno-exceptions -fno-rtti)
 set(WEB_FRAMEWORK_BUILD_MODE "release" CACHE STRING "Build mode (release, debug, asan, tsan)")
 
 if (WEB_FRAMEWORK_BUILD_MODE STREQUAL "release")
-    set(MY_CMAKE_CXX_FLAGS "${MY_CMAKE_CXX_FLAGS_BASE} -O3")
+    set(MY_CMAKE_CXX_FLAGS ${MY_CMAKE_CXX_FLAGS_BASE} -O3)
 elseif (WEB_FRAMEWORK_BUILD_MODE STREQUAL "debug")
-    set(MY_CMAKE_CXX_FLAGS "${MY_CMAKE_CXX_FLAGS_BASE} -O0 -g")
+    set(MY_CMAKE_CXX_FLAGS ${MY_CMAKE_CXX_FLAGS_BASE} -O0 -g)
 elseif (WEB_FRAMEWORK_BUILD_MODE STREQUAL "asan")
-    set(MY_CMAKE_CXX_FLAGS "${MY_CMAKE_CXX_FLAGS_BASE} -O0 -g -fsanitize=address,leak -fno-omit-frame-pointer")
+    set(MY_CMAKE_CXX_FLAGS ${MY_CMAKE_CXX_FLAGS_BASE} -O0 -g -fsanitize=address,leak -fno-omit-frame-pointer)
 elseif (WEB_FRAMEWORK_BUILD_MODE STREQUAL "tsan")
-    set(MY_CMAKE_CXX_FLAGS "${MY_CMAKE_CXX_FLAGS_BASE} -O0 -g -fsanitize=thread")
+    set(MY_CMAKE_CXX_FLAGS ${MY_CMAKE_CXX_FLAGS_BASE} -O0 -g -fsanitize=thread)
 endif()
 
 message(STATUS "Build mode: ${WEB_FRAMEWORK_BUILD_MODE}")
