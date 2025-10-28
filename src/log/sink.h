@@ -218,7 +218,7 @@ private:
 
             if (!std::filesystem::exists(candidate_path, ec)) {       
                 auto parent_path = candidate_path.parent_path();
-                if (!std::filesystem::exists(parent_path, ec)) {
+                if (!parent_path.empty() && !std::filesystem::exists(parent_path, ec)) {
                     std::filesystem::create_directories(parent_path, ec);
                     if (ec) {
                         std::println("Error: Failed to create directories for {}: {}", candidate, ec.message());
