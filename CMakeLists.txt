@@ -3,22 +3,19 @@ cmake_minimum_required(VERSION 3.15)
 
 project(web_framework LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_CXX_STANDARD_REQUIRED YES)
-set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(CMAKE_CXX_FLAGS_BASE "-Wall -Wextra -fno-exceptions -fno-rtti")
+set(MY_CMAKE_CXX_FLAGS_BASE "-Wall -Wextra -fno-exceptions -fno-rtti")
 set(WEB_FRAMEWORK_BUILD_MODE "release" CACHE STRING "Build mode (release, debug, asan, tsan)")
 
 if (WEB_FRAMEWORK_BUILD_MODE STREQUAL "release")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_BASE} -O3")
+    set(MY_CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MY_CMAKE_CXX_FLAGS_BASE} -O3")
 elseif (WEB_FRAMEWORK_BUILD_MODE STREQUAL "debug")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_BASE} -O0 -g")
+    set(MY_CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MY_CMAKE_CXX_FLAGS_BASE} -O0 -g")
 elseif (WEB_FRAMEWORK_BUILD_MODE STREQUAL "asan")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_BASE} -O0 -g -fsanitize=address,leak -fno-omit-frame-pointer")
+    set(MY_CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MY_CMAKE_CXX_FLAGS_BASE} -O0 -g -fsanitize=address,leak -fno-omit-frame-pointer")
 elseif (WEB_FRAMEWORK_BUILD_MODE STREQUAL "tsan")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_BASE} -O0 -g -fsanitize=thread")
+    set(MY_CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MY_CMAKE_CXX_FLAGS_BASE} -O0 -g -fsanitize=thread")
 endif()
 
 message(STATUS "Build mode: ${WEB_FRAMEWORK_BUILD_MODE}")
@@ -27,12 +24,17 @@ file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c
 
 add_library(web_framework ${SOURCES})
 
+set_target_properties(web_framework PROPERTIES CXX_EXTENSIONS OFF)
+
+target_compile_features(web_framework PUBLIC cxx_std_23)
+
+target_compile_options(web_framework PRIVATE ${MY_CMAKE_CXX_FLAGS})
+
 target_include_directories(web_framework 
     PUBLIC 
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
         # $<INSTALL_INTERFACE:include> # For installation, if you need it
 )
-
 
 find_library(LIBURING_LIBRARY NAMES uring)
 if (NOT LIBURING_LIBRARY)
