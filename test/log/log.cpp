@@ -2,7 +2,7 @@
 #include <string>
 #include <system_error>
 
-#include "log/log.h"
+#include "logging/log.h"
 
 
 using namespace boost::ut;
@@ -15,7 +15,7 @@ suite<"Logging Sink Tests"> _ = [] {
         constexpr size_t times = 1000;
         
         {
-            log::sink::file file_sink(filename, 1024); // 1KB max size for testing
+            logging::sink::file file_sink(filename, 1024); // 1KB max size for testing
 
             for (auto _ : std::views::iota(0uz, times)) {
                 file_sink.fmt_to("{}", msg);

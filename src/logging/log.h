@@ -10,12 +10,12 @@
 #include <format>
 #include <vector>
 
-#include "log/sink.h"
-#include "log/common.h"
+#include "logging/sink.h"
+#include "logging/common.h"
 
 #include "concurrent/mpsc_ringbuffer.h"
 
-namespace log{
+namespace logging {
 
 namespace detail {
 
@@ -204,7 +204,7 @@ inline void add_sink(std::unique_ptr<sink::basic> s) {
 namespace sync {
 template<level lvl, typename... args_t>
 void log(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
-    if constexpr (lvl <= log::max_level) {
+    if constexpr (lvl <= logging::max_level) {
         detail::logger::get_instance()->log(
             detail::packet::make<lvl>(system_clock::now(), fmt_w, std::forward<args_t>(args)...)
         );
@@ -242,7 +242,7 @@ namespace async{
 
 template<level lvl, typename... args_t>
 void log(format_string_wrapper<args_t...> fmt_w, args_t&&... args){
-    if constexpr (lvl <= log::max_level) {
+    if constexpr (lvl <= logging::max_level) {
         detail::tls().push(
             detail::packet::make<lvl>(system_clock::now(), fmt_w, std::forward<args_t>(args)...)
         );

@@ -32,7 +32,7 @@ public:
         struct final_awaiter {
             bool await_ready() noexcept { return false; }
             void await_resume() noexcept {}
-            std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type> h){
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type> h) noexcept {
                 return h.promise().previous;
             }
         };
@@ -40,9 +40,9 @@ public:
         auto final_suspend() noexcept {
             return final_awaiter{};
         }
-        void unhandled_exception(){}
+        void unhandled_exception() noexcept {}
 
-        void return_value(int64_t v){
+        void return_value(int64_t v) noexcept {
             ret = v;
         }
 

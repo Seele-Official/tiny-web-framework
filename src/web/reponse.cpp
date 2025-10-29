@@ -2,7 +2,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "log/log.h"
+#include "logging/log.h"
 #include "web/response.h"
 #include "web/routing.h"
 
@@ -36,7 +36,7 @@ task msg(const http::response::msg& msg){
             timeout
         };
         if (res <= 0) {
-            log::async::error(
+            logging::async::error(
                 "Failed to send response for `{}`: `{}`", 
                 client_addr.to_string(), io::error::msg
             );
@@ -79,7 +79,7 @@ task error(http::response::status_code code){
             timeout
         };
         if (res <= 0) {
-            log::async::error(
+            logging::async::error(
                 "Failed to send response for `{}`: `{}`", 
                 client_addr.to_string(), io::error::msg
             );
@@ -144,7 +144,7 @@ task file(const std::string& content_type, std::span<std::byte> content){
     };
 
     if (res <= 0) {
-        log::async::error(
+        logging::async::error(
             "Failed to send response for {} : {}", 
             client_addr.to_string(), io::error::msg
         );
@@ -170,7 +170,7 @@ task file(const std::string& content_type, std::span<std::byte> content){
             };
 
             if (res <= 0) {
-                log::async::error(
+                logging::async::error(
                     "Failed to send response for {} : {}", 
                     client_addr.to_string(), io::error::msg
                 );
@@ -202,7 +202,7 @@ task file(const std::string& content_type, std::span<std::byte> content){
             };
             
             if (res <= 0) { 
-                log::async::error(
+                logging::async::error(
                     "Failed to send response for {} : {}", 
                     client_addr.to_string(), io::error::msg
                 );

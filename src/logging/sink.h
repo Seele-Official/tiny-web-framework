@@ -11,10 +11,10 @@
 #include <string_view>
 #include <utility>
 
-#include "common.h"
+#include "logging/common.h"
 #include "meta.h"
 
-namespace log::sink {
+namespace logging::sink {
 
 
 namespace detail {
@@ -138,7 +138,7 @@ public:
         }
     }
 private:
-    log::level level{max_level};
+    logging::level level{max_level};
     std::mutex mutex{};
 };
 

@@ -10,7 +10,7 @@
 
 #include "coro/thread.h"
 #include "io/ctx.h"
-#include "log/log.h"
+#include "logging/log.h"
 
 namespace io::detail {
     
@@ -34,9 +34,9 @@ void ctx::worker(std::stop_token st){
             if (submit_count >= submit_threshold) {
                 auto submit_ret = io_uring_submit(&ring);
                 if (submit_ret < 0) {
-                    log::async::error("io_uring_submit failed: {}", strerror(-submit_ret));
+                    logging::async::error("io_uring_submit failed: {}", strerror(-submit_ret));
                 } else {
-                    log::async::debug("Submitted {} requests to io_uring", submit_ret);
+                    logging::async::debug("Submitted {} requests to io_uring", submit_ret);
                     submit_count = 0;
                 }
             }
@@ -45,9 +45,9 @@ void ctx::worker(std::stop_token st){
                 this->pending_req_count.fetch_add(pending_req_count, std::memory_order_acq_rel);
                 auto submit_ret = io_uring_submit(&ring);
                 if (submit_ret < 0) {
-                    log::async::error("io_uring_submit failed: {}", strerror(-submit_ret));
+                    logging::async::error("io_uring_submit failed: {}", strerror(-submit_ret));
                 } else {
-                    log::async::debug("Submitted {} requests to io_uring", submit_ret);
+                    logging::async::debug("Submitted {} requests to io_uring", submit_ret);
                     submit_count = 0;
                     pending_req_count = 0;
                 }
@@ -84,7 +84,7 @@ void ctx::handle_cqes(io_uring_cqe* cqe) {
                         }
                     }
                 } else {
-                    log::async::error("Unknown user data type in cqe");
+                    logging::async::error("Unknown user data type in cqe");
                 }
             }
         );
@@ -92,7 +92,7 @@ void ctx::handle_cqes(io_uring_cqe* cqe) {
     }
     io_uring_cq_advance(&ring, count);
     this->pending_req_count.fetch_sub(processed_req, std::memory_order_acq_rel);
-    log::async::debug("Processed {} completed requests", count);      
+    logging::async::debug("Processed {} completed requests", count);      
 }
 
 
@@ -107,10 +107,10 @@ void ctx::start_listen(std::stop_token st){
         int ret = io_uring_wait_cqes(&ring, &cqe, 1, nullptr, &sigmask); 
 
         if (ret == -EINTR){
-            log::async::debug("io_uring_wait_cqes interrupted by signal, checking for stop request");
+            logging::async::debug("io_uring_wait_cqes interrupted by signal, checking for stop request");
             continue; // Interrupted by signal, continue waiting
         } else if (ret < 0) {
-            log::sync::error("io_uring_wait_cqes failed: {}", strerror(-ret));
+            logging::sync::error("io_uring_wait_cqes failed: {}", strerror(-ret));
             break;
         } else {
             this->handle_cqes(cqe);
@@ -135,9 +135,9 @@ void ctx::clean_up() {
     this->pending_req_count.fetch_add(pending_req_count, std::memory_order_acq_rel);
     auto submit_ret = io_uring_submit(&ring);
     if (submit_ret < 0) {
-        log::async::error("io_uring_submit failed: {}", strerror(-submit_ret));
+        logging::async::error("io_uring_submit failed: {}", strerror(-submit_ret));
     } else {
-        log::async::debug("Submitted {} requests to io_uring", submit_ret);
+        logging::async::debug("Submitted {} requests to io_uring", submit_ret);
     }
 
 
@@ -153,7 +153,7 @@ void ctx::clean_up() {
         if (ret == -ETIME){
             continue; // Timeout, continue waiting
         } else if (ret < 0) {
-            log::sync::error("io_uring_wait_cqes failed: {}", strerror(-ret));
+            logging::sync::error("io_uring_wait_cqes failed: {}", strerror(-ret));
             break;
         } else {
             this->handle_cqes(cqe);

@@ -1,5 +1,5 @@
-#include "log/log.h"
-#include "log/sink.h"
+#include "logging/log.h"
+#include "logging/sink.h"
 #include "web/env.h"
 #include "web/loop.h"
 #include "web/response.h"
@@ -33,8 +33,8 @@ int main(){
 
 
     // Configure the logging system
-    log::add_sink(
-        std::make_unique<log::sink::file>("app.log")
+    logging::add_sink(
+        std::make_unique<logging::sink::file>("app.log")
     );
 
 

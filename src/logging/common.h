@@ -3,7 +3,7 @@
 #include <format>
 #include <source_location>
 #include <concepts>
-namespace log{
+namespace logging{
 
 enum class level{
     error,

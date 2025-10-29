@@ -3,7 +3,7 @@
 #include <system_error>
 #include <utility>
 #include <filesystem>
-#include "log/log.h"
+#include "logging/log.h"
 
 #include "web/loop.h"
 #include "web/mime.h"
@@ -35,7 +35,7 @@ coro::simple_task async_handle_connection(int fd, ip::v4 a) {
             };
 
             if (bytes_read <= 0) {
-                log::async::error("Failed to read from {}: {}", 
+                logging::async::error("Failed to read from {}: {}", 
                     client_addr.to_string(), io::error::msg
                 );
                 co_return;
@@ -66,7 +66,7 @@ coro::simple_task async_handle_connection(int fd, ip::v4 a) {
 
 
         } else {
-            log::async::error("Failed to parse request from {}", client_addr.to_string());
+            logging::async::error("Failed to parse request from {}", client_addr.to_string());
             co_await web::response::error(http::response::status_code::bad_request)
                         .settings({fd_w.get(), client_addr, timeout});
             co_return;
@@ -87,17 +87,17 @@ coro::simple_task server_loop(int32_t f) {
         switch (ret) {
             case io::error::SYS:
             case io::error::CTX_CLOSED:
-                log::async::error("Failed to accept connection: {}", io::error::msg);
+                logging::async::error("Failed to accept connection: {}", io::error::msg);
                 co_return;
             case io::error::TIMEOUT:
-                log::async::debug("Accept timed out, retrying...");
+                logging::async::debug("Accept timed out, retrying...");
                 continue;
             default:
                 break;
         
         }
         auto ipv4_addr = ip::v4::from_sockaddr_in(client_addr);
-        log::async::info("Fd[{}]: Accepted connection from {}", fd, ipv4_addr.to_string());
+        logging::async::info("Fd[{}]: Accepted connection from {}", fd, ipv4_addr.to_string());
         async_handle_connection(ret, ipv4_addr);
     }
 
@@ -161,7 +161,7 @@ void add_static_file_router(){
             }
 
             auto relative_path_str = std::format("/{}", full_path.lexically_relative(root).c_str());
-            log::sync::info("Adding file `{}` to router as `{}`", full_path.string(), relative_path_str);
+            logging::sync::info("Adding file `{}` to router as `{}`", full_path.string(), relative_path_str);
 
             routing::env::static_routers().push_back(
                 {
@@ -183,7 +183,7 @@ void add_static_file_router(){
 
     // Register static file routers
     for (auto& [head_router, router] : routing::env::static_routers()) {
-        log::sync::info("Adding file router: {}", router.name);
+        logging::sync::info("Adding file router: {}", router.name);
         routing::get(router.name, router);
         routing::head(head_router.name, head_router);
     }
