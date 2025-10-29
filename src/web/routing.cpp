@@ -9,8 +9,9 @@
 #include <utility>
 #include <vector>
 
+#include "logging/log.h"
 #include "web/routing.h"
-#include "http/request.h"
+#include "http/http.h"
 
 
 
@@ -204,15 +205,24 @@ route_result route(const request::msg& req){
 
 
     if (auto origin = std::get_if<http::request::origin_form>(&target)) {
-        // Notice: we assume that the path is already percent-decoded
         auto& map = static_router_map(req.line.method);
         auto& tree = dynamic_router_tree(req.line.method);
 
-        if (auto it = map.find(origin->path); it != map.end()) {
+        std::error_code ec;
+        auto pct_decoded_path = http::pct_decode(
+            origin->path, ec
+        );
+        
+        if (ec) {
+            logging::async::error("Failed to decode URI `{}`: {}", origin->path, ec.message());
+            return web::response::error(http::response::status_code::bad_request);
+        }
+
+        if (auto it = map.find(pct_decoded_path); it != map.end()) {
             return it->second(req);
         } else if (auto ret = 
                 tree.route(
-                        std::string_view{origin->path}
+                        std::string_view{pct_decoded_path}
                             | std::views::split('/')
                             | std::views::transform([](auto &&rng) {
                                 return std::string_view(rng);

@@ -6,6 +6,7 @@
 #include <print>
 #include <thread>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <format>
 #include <vector>
@@ -113,11 +114,12 @@ public:
         sinks.push_back(std::move(s));
     }
 
-    void add_sinks(std::vector<std::unique_ptr<sink::basic>> ss) {
+    template<typename... args_t>
+        requires (std::is_same_v<std::unique_ptr<sink::basic>, args_t> && ...)
+                || (std::is_convertible_v<args_t, std::unique_ptr<sink::basic>> && ...)
+    void add_sinks(args_t... ss) {
         std::lock_guard lock{mutex};
-        for (auto& s : ss) {
-            sinks.push_back(std::move(s));
-        }
+        (sinks.push_back(std::move(ss)), ...);
     }
 
     void log(const packet& p) {
@@ -200,6 +202,12 @@ inline void add_sink(std::unique_ptr<sink::basic> s) {
     detail::logger::get_instance()->add_sink(std::move(s));
 }
 
+template<typename... args_t>
+    requires (std::is_same_v<std::unique_ptr<sink::basic>, args_t> && ...)
+            || (std::is_convertible_v<args_t, std::unique_ptr<sink::basic>> && ...)
+inline void add_sinks(args_t... ss) {
+    detail::logger::get_instance()->add_sinks(std::move(ss)...);
+}
 
 namespace sync {
 template<level lvl, typename... args_t>
