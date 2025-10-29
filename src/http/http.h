@@ -1,5 +1,6 @@
 #pragma once
 #include <charconv>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <system_error>
@@ -32,7 +33,7 @@ std::string pct_decode(It first, Sent last, std::error_code& ec) {
             }
             hex_chars[1] = *first;
 
-            char decoded_val;
+            uint8_t decoded_val;
 
             auto res = std::from_chars(hex_chars, hex_chars + 2, decoded_val, 16);
 
