@@ -5,6 +5,7 @@
 #include <ranges>
 #include <type_traits>
 #include <functional>
+#include <vector>
 
 #include "web/response.h"
 #include "http/request.h"
@@ -67,70 +68,39 @@ private:
 using route_result = web::response::task;
 
 namespace detail {
+
 route_result route(const request::msg& req);
-
-struct file_router{
-    response::task operator()(const http::request::msg&){
-        return response::file(
-            this->content_type,
-            this->content
-        );
-    }
-
-    std::string name{};
-    std::string content_type{};
-    io::mmap    content{};
-};
-
-struct file_head_router{
-    web::response::task operator()(const http::request::msg&){
-        return web::response::file_head(
-            this->content_type, 
-            this->size
-        );
-    }
-    std::string name{};
-    std::string content_type{};
-    size_t size{};
-};
-
-struct env{
-    std::filesystem::path root_path = std::filesystem::current_path() / "www";
-    std::vector<std::pair<file_head_router, file_router>> static_routers{};
-    
-    function_ref<
-        std::string_view(http::response::status_code)
-    > error_page_provider = [](http::response::status_code code) -> std::string_view {
-        return http::response::status_code_to_string(code);
-    };
-
-    static inline env& get_instance() {
-        static env instance;
-        return instance;
-    }
-};
-
 
 } // namespace detail
 
 namespace env {
 
-using file_router = detail::file_router;
-using file_head_router = detail::file_head_router;
-
 inline std::filesystem::path& root_path(){
-    return detail::env::get_instance().root_path;
+    static std::filesystem::path root_path = std::filesystem::current_path() / "www";
+    return root_path;
 }
-inline std::vector<std::pair<file_head_router, file_router>>& static_routers(){
-    return detail::env::get_instance().static_routers;
+
+inline std::vector<std::string>& index_files(){
+    static std::vector<std::string> index_files = { "index.html", "index.htm" };
+    return index_files;
 }
+
 inline function_ref<
     std::string_view(http::response::status_code)
 >& error_page_provider(){
-    return detail::env::get_instance().error_page_provider;
+    static function_ref<
+        std::string_view(http::response::status_code)
+    > error_page_provider = [](http::response::status_code code) -> std::string_view {
+        return http::response::status_code_to_string(code);
+    };
+    return error_page_provider;
 }
 } // namespace env
 
+
+void add_static_resource_router(const std::filesystem::path& file_path, const std::string& route_path);
+
+void configure_static_resource_routes();
 
 using router = function_ref<route_result(const request::msg&)>;
 

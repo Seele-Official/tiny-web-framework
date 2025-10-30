@@ -1,12 +1,10 @@
 #include <cstdint>
 #include <csignal>
-#include <system_error>
+#include <string_view>
 #include <utility>
-#include <filesystem>
 #include "logging/log.h"
 
 #include "web/loop.h"
-#include "web/mime.h"
 
 #include "coro/simple_task.h"
 #include "coro/thread.h"
@@ -15,6 +13,15 @@
 #include "web/routing.h"
 
 namespace web::loop {
+namespace env {
+std::vector<io::fd>& accepter_fds(){
+    static std::vector<io::fd> accepter_fds{};
+    return accepter_fds;
+}
+}
+
+
+
 using namespace std::literals;
 coro::simple_task async_handle_connection(int fd, ip::v4 a) {
     io::fd fd_w(fd);
@@ -114,88 +121,13 @@ coro::simple_task cancel(int32_t fd) {
 
 
 
-void add_static_file_router(){
-    auto root = std::filesystem::absolute(routing::env::root_path());
-    
-    if (!std::filesystem::exists(root)) {
-        std::println("Root path does not exist: {}", routing::env::root_path().string());
-        std::terminate();
-    }
-
-    if (!std::filesystem::is_directory(root)) {
-        std::println("Root path is not a directory: {}", routing::env::root_path().string());
-        std::terminate();
-    }
-
-    routing::env::static_routers().reserve(512);
-    // Recursively iterate through the directory and add files to the static router
-    for (const auto& entry : std::filesystem::recursive_directory_iterator(root)) {
-        if (entry.is_regular_file()) {
-            auto full_path = std::filesystem::absolute(entry.path());
-
-            std::error_code ec;
-
-            auto file_size = std::filesystem::file_size(full_path, ec);
-
-            if (ec) {
-                std::println("Failed to get file size for {}: {}", full_path.string(), ec.message());
-                std::terminate();
-            }
-            if (file_size == 0) {
-                std::println("File is empty: {}", full_path.string());
-                continue;
-            }            
-
-            auto fd  = io::fd::open_file(full_path, O_RDONLY);
-
-            if (!fd.is_valid()) {
-                std::println("Failed to open file: {}", full_path.string());
-                std::terminate();
-            }
-
-
-            std::string content_type = "application/octet-stream";
-            std::string ext = full_path.extension().string();
-            if (auto it = web::mime_types.find(ext);it != web::mime_types.end()) {
-                content_type = it->second;
-            }
-
-            auto relative_path_str = std::format("/{}", full_path.lexically_relative(root).c_str());
-            logging::sync::info("Adding file `{}` to router as `{}`", full_path.string(), relative_path_str);
-
-            routing::env::static_routers().push_back(
-                {
-                    routing::env::file_head_router{
-                        relative_path_str,
-                        content_type,
-                        (size_t)file_size
-                    },
-                    routing::env::file_router{
-                        relative_path_str, 
-                        content_type,
-                        {(size_t)file_size, PROT_READ, MAP_SHARED, fd.get(), 0}
-                    }
-                }
-            );
-
-        }
-    }
-
-    // Register static file routers
-    for (auto& [head_router, router] : routing::env::static_routers()) {
-        logging::sync::info("Adding file router: {}", router.name);
-        routing::get(router.name, router);
-        routing::head(head_router.name, head_router);
-    }
-}
-
 void run(){
     if (!env::listen_addr().is_valid()){
         std::println("Server address is not valid");
         std::terminate();
     }
 
-    add_static_file_router();
+    routing::configure_static_resource_routes();
 
 
     for (auto _ : std::views::iota(0uz, env::worker_count())){

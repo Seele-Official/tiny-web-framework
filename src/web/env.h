@@ -27,11 +27,16 @@ inline std::filesystem::path& root_path(){
     return routing::env::root_path();
 }
 
+inline std::vector<std::string>& index_files(){
+    return routing::env::index_files();
+}
+
 inline routing::function_ref<
     std::string_view(http::response::status_code)
 >& error_page_provider(){
     return routing::env::error_page_provider();
 }
+
 
 struct chain {
     chain& set_listen_addr(const web::ip::v4& addr) {
@@ -51,6 +56,11 @@ struct chain {
 
     chain& set_max_worker_conn(size_t count) {
         max_worker_conn() = count;
+        return *this;
+    }
+
+    chain& set_index_files(std::vector<std::string> files) {
+        index_files() = std::move(files);
         return *this;
     }
 

@@ -39,6 +39,7 @@ int main(){
         .set_root_path("www")
         .set_max_worker_conn(128)
         .set_worker_count(16)
+        .set_index_files({"index.html", "index.htm"})
         /* Options for custom error page provider:
          .set_error_page_provider([](http::response::status_code) -> std::string_view {})
         */

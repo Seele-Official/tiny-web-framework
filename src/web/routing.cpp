@@ -1,4 +1,4 @@
-#include <algorithm>
+#include <cstddef>
 #include <exception>
 #include <memory>
 #include <optional>
@@ -11,6 +11,7 @@
 
 #include "logging/log.h"
 #include "web/routing.h"
+#include "web/mime.h"
 #include "http/http.h"
 
 
@@ -252,6 +253,139 @@ route_result route(const request::msg& req){
     return web::response::error(http::response::status_code::bad_request);
 }
 }
+
+namespace env {
+
+struct resource_router{
+    response::task operator()(const http::request::msg&){
+        return response::file(
+            this->content_type,
+            this->content
+        );
+    }
+
+    std::string name{};
+    std::string content_type{};
+    io::mmap    content{};
+};
+
+struct resource_head_router{
+    web::response::task operator()(const http::request::msg&){
+        return web::response::file_head(
+            this->content_type, 
+            this->size
+        );
+    }
+    std::string name{};
+    std::string content_type{};
+    size_t size{};
+};
+
+std::vector<std::pair<resource_head_router, resource_router>>& static_routers(){
+    static std::vector<std::pair<resource_head_router, resource_router>> static_routers{};
+    return static_routers;
+
+} 
+
+}
+
+void add_static_resource_router(const std::filesystem::path& file_path, const std::string& route_path) {
+    std::error_code ec;
+
+    auto file_size = std::filesystem::file_size(file_path, ec);
+    if (ec) {
+        std::println(stderr, "Failed to get file size for {}: {}", file_path.string(), ec.message());
+        std::terminate();
+    }
+    if (file_size == 0) {
+        // Silently skip empty files, or log if desired
+        logging::sync::warn("Skipping empty file: {}", file_path.string());
+        return;
+    }
+
+    auto fd = io::fd::open_file(file_path, O_RDONLY);
+    if (!fd.is_valid()) {
+        std::println(stderr, "Failed to open file: {}", file_path.string());
+        std::terminate();
+    }
+
+    std::string content_type = "application/octet-stream"; // Default
+    std::string ext = file_path.extension().string();
+    if (auto it = web::mime_types.find(ext); it != web::mime_types.end()) {
+        content_type = it->second;
+    }
+
+    routing::env::static_routers().push_back({
+        routing::env::resource_head_router{
+            route_path,
+            content_type,
+            (size_t) file_size
+        },
+        routing::env::resource_router{
+            route_path,
+            content_type,
+            {(size_t) file_size, PROT_READ, MAP_SHARED, fd.get(), 0}
+        }
+    });
+
+    auto& [head_router, get_router] = routing::env::static_routers().back();
+    logging::sync::info("Adding file router: GET {} and HEAD {}", get_router.name, head_router.name);
+    routing::get(get_router.name, get_router);
+    routing::head(head_router.name, head_router);
+}
+
+void configure_static_resource_routes() {
+    auto root = std::filesystem::absolute(routing::env::root_path());
+
+    if (!std::filesystem::exists(root) || !std::filesystem::is_directory(root)) {
+        std::println(stderr, "Root path is not a valid directory: {}", root.string());
+        std::terminate();
+    }
+
+    routing::env::static_routers().reserve(512);
+
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(root)) {
+        if (entry.is_regular_file()) {
+            auto full_path = std::filesystem::absolute(entry.path());
+            
+            // Use generic_string() to ensure forward slashes in the route
+            auto relative_path = full_path.lexically_relative(root).generic_string();
+            auto route_str = std::format("/{}", relative_path);
+
+            add_static_resource_router(full_path, route_str);
+
+        } else if (entry.is_directory()) {
+            // Check for default index files in this directory
+            for (const auto& index_filename : routing::env::index_files()) {
+                auto index_path = entry.path() / index_filename;
+
+                if (std::filesystem::exists(index_path) && std::filesystem::is_regular_file(index_path)) {
+                    auto full_path = std::filesystem::absolute(index_path);
+
+                    // The route for an index file is its parent directory's path
+                    auto relative_dir_path = full_path.parent_path().lexically_relative(root).generic_string();
+                    
+                    std::string route_str;
+                    if (relative_dir_path.empty()) {
+                        // This is the index file for the root directory itself
+                        route_str = "/";
+                    } else {
+                        // Index for a subdirectory, ensure it has a trailing slash
+                        route_str = std::format("/{}/", relative_dir_path);
+                    }
+                    
+                    add_static_resource_router(full_path, route_str);
+
+                    // Found an index file for this directory, stop searching
+                    break; 
+                }
+            }
+        }
+    }
+}
+
+
+
 
 
 namespace dynamic {
