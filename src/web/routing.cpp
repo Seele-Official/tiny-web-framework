@@ -329,9 +329,10 @@ void add_static_resource_router(const std::filesystem::path& file_path, const st
     });
 
     auto& [head_router, get_router] = routing::env::static_routers().back();
-    logging::sync::info("Adding file router: GET {} and HEAD {}", get_router.name, head_router.name);
     routing::get(get_router.name, get_router);
     routing::head(head_router.name, head_router);
+
+    logging::sync::info("Adding static resource route: `{}` -> `{}`", route_path, file_path.string());
 }
 
 void configure_static_resource_routes() {
@@ -343,6 +344,19 @@ void configure_static_resource_routes() {
     }
 
     routing::env::static_routers().reserve(512);
+
+    for (const auto& index_filename : routing::env::index_files()) {
+        auto index_path = root / index_filename;
+
+        if (std::filesystem::exists(index_path) && std::filesystem::is_regular_file(index_path)) {
+            auto full_path = std::filesystem::absolute(index_path);
+            
+            // The route for an index file in the root directory is "/"
+            add_static_resource_router(full_path, "/");
+
+            break; // Found an index file for the root, stop searching
+        }
+    }
 
     for (const auto& entry : std::filesystem::recursive_directory_iterator(root)) {
         if (entry.is_regular_file()) {
@@ -365,16 +379,8 @@ void configure_static_resource_routes() {
                     // The route for an index file is its parent directory's path
                     auto relative_dir_path = full_path.parent_path().lexically_relative(root).generic_string();
                     
-                    std::string route_str;
-                    if (relative_dir_path.empty()) {
-                        // This is the index file for the root directory itself
-                        route_str = "/";
-                    } else {
-                        // Index for a subdirectory, ensure it has a trailing slash
-                        route_str = std::format("/{}/", relative_dir_path);
-                    }
                     
-                    add_static_resource_router(full_path, route_str);
+                    add_static_resource_router(full_path, std::format("/{}/", relative_dir_path));
 
                     // Found an index file for this directory, stop searching
                     break; 
@@ -382,6 +388,8 @@ void configure_static_resource_routes() {
             }
         }
     }
+
+
 }
 
 
