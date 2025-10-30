@@ -350,7 +350,7 @@ void configure_static_resource_routes() {
 
         if (std::filesystem::exists(index_path) && std::filesystem::is_regular_file(index_path)) {
             auto full_path = std::filesystem::absolute(index_path);
-            
+
             // The route for an index file in the root directory is "/"
             add_static_resource_router(full_path, "/");
 
@@ -381,7 +381,7 @@ void configure_static_resource_routes() {
                     
                     
                     add_static_resource_router(full_path, std::format("/{}/", relative_dir_path));
-
+                    add_static_resource_router(full_path, std::format("/{}", relative_dir_path));
                     // Found an index file for this directory, stop searching
                     break; 
                 }
