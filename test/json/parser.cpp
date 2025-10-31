@@ -1,4 +1,7 @@
+#include <bit>
 #include <boost/ut.hpp>
+#include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -56,7 +59,18 @@ suite<"Data Types"> data_types = [] {
         expect(result.has_value());
         auto str = result->as<Json::string>();
         expect(str.has_value());
-        expect(str->get() == Json::string("Hello, \\u4F60\\u597D"));
+        uint8_t expected_bytes[] = {
+            0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x2C, 0x20,
+            0xE4, 0xBD, 0xA0,     // 你
+            0xE5, 0xA5, 0xBD,  // 好
+        };
+
+        Json::string expected_str;
+        for (auto byte : expected_bytes) {
+            expected_str.push_back(std::bit_cast<char>(byte));
+        }
+
+        expect(str->get() == expected_str);
     };
 
     "Empty String"_test = [] {

@@ -22,6 +22,7 @@ namespace std {
         );
     }
 
+    //TODO: Handle escaping of special characters
     fmt_ctx::iterator formatter<Json::string>::format(const Json::string& s, fmt_ctx& ctx) const {
         return format_to(ctx.out(), R"("{}")", (std::string)s);
     }

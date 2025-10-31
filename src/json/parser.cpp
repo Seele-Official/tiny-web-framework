@@ -182,18 +182,22 @@ std::expected<Json::array, error> parser::parse_array() {
 
     Json::array arr;
     arr.reserve(4);
+    token* trailing_comma = nullptr;
     while (this->get_current().type != token::RBRACKET) {
         if (auto value = this->parse_value()) {
             arr.push_back(std::move(*value));
         } else {
             return std::unexpected(value.error());
         }
-
+        trailing_comma = nullptr;
         if (this->get_current().type == token::COMMA) {
-            this->consume();
+            trailing_comma = &this->consume();
         } else if (this->get_current().type != token::RBRACKET) {
             return std::unexpected(error::make("Expected ',' or ']'", this->get_current()));
         }
+    }
+    if (trailing_comma && trailing_comma->type == token::COMMA) {
+        return std::unexpected(error::make("Trailing comma in array", *trailing_comma));
     }
     this->consume();
     return arr;
@@ -206,6 +210,7 @@ std::expected<Json::object, error> parser::parse_object() {
     this->consume();
 
     object obj;
+    token* trailing_comma = nullptr;
     while (this->get_current().type != token::RBRACE) {
 
         auto key = this->parse_string();
@@ -226,11 +231,16 @@ std::expected<Json::object, error> parser::parse_object() {
 
         obj.emplace(std::move(*key), std::move(*value));
 
+        trailing_comma = nullptr;
+
         if (this->get_current().type == token::COMMA) {
-            this->consume();
+            trailing_comma = &this->consume();
         } else if (this->get_current().type != token::RBRACE) {
             return std::unexpected(error::make("Expected ',' or '}'", this->get_current()));
         }
+    }
+    if (trailing_comma && trailing_comma->type == token::COMMA) {
+        return std::unexpected(error::make("Trailing comma in object", *trailing_comma));
     }
     this->consume();
     return obj;
@@ -258,18 +268,59 @@ std::expected<Json::number, error> parser::parse_number() {
     return std::unexpected(error::make("Expected number", this->get_current()));
 }
 
-//TODO: add support for unicode escape sequences
+
 std::expected<Json::string, error> parser::parse_string() {
     auto current = this->get_current();
     if (current.type == token::STRING) {
         Json::string str;
-        auto size = current.lexeme.size() - 2;
-        str.reserve(size);
-        for (size_t index = 1; index <= size; ++index) {
-            if (current.lexeme[index] == '\\') {
+        auto lexeme = current.lexeme;
+        auto size = lexeme.size() - 1; // Ignore closing quote
+        str.reserve(size - 1); // Ignore opening quote
+        for (size_t index = 1; index < size; ++index) {
+            if (lexeme[index] == '\\') {
                 ++index;
+                switch (lexeme[index]) {
+                    case '"':  str.push_back('"'); break;
+                    case '\\': str.push_back('\\'); break;
+                    case '/':  str.push_back('/'); break;
+                    case 'b':  str.push_back('\b'); break;
+                    case 'f':  str.push_back('\f'); break;
+                    case 'n':  str.push_back('\n'); break;
+                    case 'r':  str.push_back('\r'); break;
+                    case 't':  str.push_back('\t'); break;
+                    case 'u': {
+                        if (index + 4 >= size) {
+                            return std::unexpected(error::make("Invalid unicode escape sequence: not enough digits", current));
+                        }
+                        std::string hex_str(lexeme.substr(index + 1, 4));
+                        uint32_t codepoint;
+                        auto [ptr, ec] = std::from_chars(hex_str.data(), hex_str.data() + 4, codepoint, 16);
+                        if (ec != std::errc()) {
+                            return std::unexpected(error::make("Invalid unicode escape sequence: invalid hex", current));
+                        }
+                        index += 4;
+                        
+                        // Basic UTF-8 encoding for a single code point from BMP
+                        if (codepoint <= 0x7F) {
+                            str.push_back(static_cast<char>(codepoint));
+                        } else if (codepoint <= 0x7FF) {
+                            str.push_back(static_cast<char>(0xC0 | (codepoint >> 6)));
+                            str.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+                        } else { // 0x800 to 0xFFFF
+                            str.push_back(static_cast<char>(0xE0 | (codepoint >> 12)));
+                            str.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+                            str.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+                        }
+                        break;
+                    }
+                    default:
+                        // As per JSON standard, any other escape is an error.
+                        // Or we can just push the character as is. For now, let's be strict.
+                        return std::unexpected(error::make("Invalid escape character", current));
+                }
+            } else {
+                str.push_back(lexeme[index]);
             }
-            str.push_back(current.lexeme[index]);
         }
         this->consume();
         return str;
