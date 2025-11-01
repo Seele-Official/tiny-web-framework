@@ -36,18 +36,19 @@ template<>
 struct router_map_dispatcher<request::method::OPTIONS>{
     static router_map& get(){
         static router_map map{
-        {"*", 
-                [](const request::msg&) -> route_result {
-                    return web::response::msg({
-                        {http::response::status_code::ok},
-                        {
-                            {"Content-Length", "0"},
-                            {"Allow", "GET, HEAD, POST, PUT, DELETE, OPTIONS"}
-                        },
-                        ""
-                    });
-                }
+        {
+            "*", 
+            [](const request::msg&) -> route_result {
+                return web::response::msg({
+                    {http::response::status_code::ok},
+                    {
+                        {"Content-Length", "0"},
+                        {"Allow", "GET, HEAD, POST, PUT, DELETE, OPTIONS"}
+                    },
+                    ""
+                });
             }
+        }
         };
         return map;
     }
@@ -223,13 +224,13 @@ route_result route(const request::msg& req){
             return it->second(req);
         } else if (auto ret = 
                 tree.route(
-                        std::string_view{pct_decoded_path}
-                            | std::views::split('/')
-                            | std::views::transform([](auto &&rng) {
-                                return std::string_view(rng);
-                            }),
-                        req
-                    )
+                    std::string_view{pct_decoded_path}
+                        | std::views::split('/')
+                        | std::views::transform([](auto &&rng) {
+                            return std::string_view(rng);
+                        }),
+                    req
+                )
             ; ret) {
             
             return std::move(ret.value());

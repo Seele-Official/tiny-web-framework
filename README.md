@@ -35,4 +35,4 @@ A simple web framework implemented in C++23 for study.
 
 ## Usage
 
-See the `example` directory for a simple usage example.
+See the [example.cpp](/example/example.cpp) for a simple usage example.
