@@ -7,9 +7,12 @@
 #include <optional>
 #include <print>
 #include <thread>
+#include <csignal>
 
-#include "coro/thread.h"
 #include "io/ctx.h"
+#include "coro/lazy_task.h"
+#include "coro/thread.h"
+#include "coro/simple_task.h"
 #include "logging/log.h"
 
 namespace io::detail {
@@ -59,9 +62,10 @@ void ctx::worker(std::stop_token st){
 }
 
 
-void ctx::handle_cqes(io_uring_cqe* cqe) {
+size_t ctx::handle_reqs(io_uring_cqe* cqe) {
+    size_t processed_req_count = 0;
+
     uint32_t head, count = 0;
-    size_t processed_req = 0;
     io_uring_for_each_cqe(&ring, head, cqe) {
         count++;
         auto* data = std::bit_cast<usr_data*>(cqe->user_data);
@@ -70,7 +74,7 @@ void ctx::handle_cqes(io_uring_cqe* cqe) {
                 if constexpr (std::is_same_v<T, io_usr_data>) {
                     usr_data.io_ret->store(cqe->res, std::memory_order_release); // Copy the cqe result to the user data
                     coro::thread::dispatch(usr_data.handle);
-                    this->pending_req_count.fetch_sub(1, std::memory_order_release);
+                    processed_req_count++;
                 } else if constexpr (std::is_same_v<T, timeout_usr_data>) {
                     switch (cqe->res) {
                         case -ETIME:
@@ -91,31 +95,39 @@ void ctx::handle_cqes(io_uring_cqe* cqe) {
         this->usr_data_pool.deallocate(data); // Clean up the user data
     }
     io_uring_cq_advance(&ring, count);
-    this->pending_req_count.fetch_sub(processed_req, std::memory_order_acq_rel);
-    logging::async::debug("Processed {} completed requests", count);      
+
+    return processed_req_count;
 }
 
 
 
-void ctx::start_listen(std::stop_token st){
-    sigset_t sigmask;
-    sigemptyset(&sigmask); 
-    sigdelset(&sigmask, SIGINT);
+void ctx::start_listen(std::stop_token st) {
+    __kernel_timespec ts{ .tv_sec = 1, .tv_nsec = 0 };
 
     while (!st.stop_requested()) {
         io_uring_cqe* cqe;
-        int ret = io_uring_wait_cqes(&ring, &cqe, 1, nullptr, &sigmask); 
+        int ret = io_uring_wait_cqes(&ring, &cqe, 1, &ts, nullptr);
 
-        if (ret == -EINTR){
-            logging::async::debug("io_uring_wait_cqes interrupted by signal, checking for stop request");
-            continue; // Interrupted by signal, continue waiting
-        } else if (ret < 0) {
-            logging::sync::error("io_uring_wait_cqes failed: {}", strerror(-ret));
-            break;
+        if (ret < 0) {
+            switch (ret) {
+                case -ETIME:
+                    continue; // Timeout, continue waiting
+                case -EINTR:
+                    continue; // Interrupted by signal, continue waiting
+                default:
+                    logging::sync::error("io_uring_wait_cqes failed: {}", strerror(-ret));
+                    return;
+            }
         } else {
-            this->handle_cqes(cqe);
+            size_t count = this->handle_reqs(cqe);
+            this->pending_req_count.fetch_sub(count, std::memory_order_acq_rel);
+            logging::async::debug("Processed {} completed requests", count);
         }
     }
+}
+
+void ctx::request_stop(){
+    this->stop_src.request_stop();
 }
 
 void ctx::clean_up() {
@@ -156,7 +168,7 @@ void ctx::clean_up() {
             logging::sync::error("io_uring_wait_cqes failed: {}", strerror(-ret));
             break;
         } else {
-            this->handle_cqes(cqe);
+            this->handle_reqs(cqe);
         }
     }
 }

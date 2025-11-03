@@ -31,6 +31,10 @@ inline void run() {
     detail::ctx::get_instance().run();
 }
 
+inline void clean_up() {
+    detail::ctx::get_instance().clean_up();
+}
+
 inline void request_stop() {
     detail::ctx::get_instance().request_stop();
 }

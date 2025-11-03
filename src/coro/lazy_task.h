@@ -19,7 +19,7 @@ public:
         auto final_suspend() noexcept{
             return std::suspend_always{};
         }
-        void unhandled_exception() {  }
+        void unhandled_exception() {}
 
 
         void return_value(const return_t& v){
@@ -72,7 +72,7 @@ class lazy_task<void>{
 public:
     struct promise_type{
         lazy_task<void> get_return_object(){
-            return {};
+            return lazy_task<void>{this};
         }
 
         auto initial_suspend(){
@@ -86,6 +86,25 @@ public:
 
         void return_void(){}
     };
+    explicit lazy_task(promise_type* p): handle{handle_type::from_promise(*p)}{}
+    lazy_task(lazy_task&& other) = delete;
+    lazy_task(const lazy_task& other) = delete;
+    lazy_task& operator=(lazy_task&& other) = delete;
+    lazy_task& operator=(const lazy_task& other) = delete;
+
+    ~lazy_task(){
+        while (!handle.done())
+            std::this_thread::yield();
+        handle.destroy();
+    }
+
+    bool done() const{
+        return handle.done();
+    }
+    
+private:
+    using handle_type = std::coroutine_handle<promise_type>;
+    handle_type handle;
 };
 
 }

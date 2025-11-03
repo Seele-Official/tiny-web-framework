@@ -142,22 +142,22 @@ public:
         return data_ptr;
     }
 
-    inline int32_t register_file_alloc_range(uint32_t off, uint32_t len) {
+    int32_t register_file_alloc_range(uint32_t off, uint32_t len) {
         return io_uring_register_file_alloc_range(&ring, off, len);
     }
 
-    inline int32_t register_files_sparse(uint32_t count) {
+    int32_t register_files_sparse(uint32_t count) {
         return io_uring_register_files_sparse(&ring, count);
     }
 
-    inline int32_t register_files(const int32_t* fds, uint32_t count) {
+    int32_t register_files(const int32_t* fds, uint32_t count) {
         return io_uring_register_files(&ring, fds, count);
     }
-    inline int32_t unregister_files() {
+    int32_t unregister_files() {
         return io_uring_unregister_files(&ring);
     }
 
-    inline bool submit(void* helper_ptr, auto (*ring_handle)(void*, io_uring*) -> int) {
+    bool submit(void* helper_ptr, auto (*ring_handle)(void*, io_uring*) -> int) {
         if (this->is_worker_running.load(std::memory_order_acquire)){
             this->unprocessed_requests.emplace_back(helper_ptr, ring_handle);
             this->unp_sem.release();            
@@ -167,16 +167,15 @@ public:
     }
 
 
-    inline void request_stop() { stop_src.request_stop(); }
-    
-    inline void run(){ 
+    void request_stop();
+
+    void run() { 
         this->start_listen(stop_src.get_token());
-        this->clean_up(); 
     }
 
     void clean_up();
 
-    inline static ctx& get_instance() {
+    static ctx& get_instance() {
         static ctx instance;
         return instance;
     }
@@ -186,7 +185,7 @@ private:
 
     void start_listen(std::stop_token st);
 
-    void handle_cqes(io_uring_cqe* cqe);
+    size_t handle_reqs(io_uring_cqe* cqe);
 
     ctx(uint32_t entries = 128, uint32_t flags = 0) : 
         pending_req_count{0}, 

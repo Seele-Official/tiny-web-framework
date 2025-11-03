@@ -1,12 +1,15 @@
 #include <cstdint>
 #include <csignal>
 #include <string_view>
+#include <thread>
 #include <utility>
+#include "coro/lazy_task.h"
 #include "logging/log.h"
 
 #include "web/loop.h"
 
 #include "coro/simple_task.h"
+#include "coro/lazy_task.h"
 #include "coro/thread.h"
 
 #include "web/response.h"
@@ -113,8 +116,8 @@ coro::simple_task server_loop(int32_t f) {
 
 
 
-coro::simple_task cancel(int32_t fd) {
-    if (co_await io::awaiter::cancel_fd{fd} != 0){
+coro::lazy_task<void> cancel(int32_t fd) {
+    while (co_await io::awaiter::cancel_fd{fd} != 0){
         std::println("Failed to cancel fd: {}", fd);
     }
 }
@@ -153,15 +156,20 @@ void run(){
 
     std::signal(SIGINT, [](int) {
         std::println("Received SIGINT, stopping server...");
-        for (auto& fd: env::accepter_fds()){
-            cancel(fd.get());
-        }
-        // TODO : Graceful shutdown
-        std::atomic_thread_fence(std::memory_order_seq_cst);
-        io::request_stop(); 
+
+        static std::jthread shutdown_thread([](){
+            for (auto& fd: env::accepter_fds()){
+                cancel(fd.get());
+            }
+
+            io::request_stop(); 
+        });
+
     });
 
     io::run();
+
+    io::clean_up();
 }
 
 
