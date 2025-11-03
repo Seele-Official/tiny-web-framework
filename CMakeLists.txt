@@ -43,6 +43,20 @@ if(BUILD_TESTING)
 
     enable_testing()
 
+    set(RELEASE_COMPILE_FLAGS "-O3")
+    set(DEBUG_COMPILE_FLAGS "-O0 -g")
+    set(ASAN_COMPILE_FLAGS "-O0 -g -fsanitize=address,leak -fno-omit-frame-pointer")
+    set(ASAN_LINK_FLAGS "-fsanitize=address,leak")
+    set(TSAN_COMPILE_FLAGS "-O0 -g -fsanitize=thread")
+    set(TSAN_LINK_FLAGS "-fsanitize=thread")
+
+    target_compile_options(web_framework PRIVATE 
+        $<$<CONFIG:Release>:${RELEASE_COMPILE_FLAGS}>
+        $<$<CONFIG:Debug>:${DEBUG_COMPILE_FLAGS}>
+        $<$<CONFIG:Asan>:${ASAN_COMPILE_FLAGS}>
+        $<$<CONFIG:Tsan>:${TSAN_COMPILE_FLAGS}>
+    )
+
     include(FetchContent)
     FetchContent_Declare(
         boost_ut
@@ -55,20 +69,17 @@ if(BUILD_TESTING)
 
     add_executable(unit_test ${TEST_SOURCES})
 
-    # --- Build type configurations for unit_test ---
-    # Release: -O3
-    target_compile_options(unit_test PRIVATE $<$<CONFIG:Release>:-O3>)
-
-    # Debug: -O0 -g
-    target_compile_options(unit_test PRIVATE $<$<CONFIG:Debug>:-O0 -g>)
-
-    # Address Sanitizer: -O0 -g -fsanitize=address,leak
-    target_compile_options(unit_test PRIVATE $<$<CONFIG:Asan>:-O0 -g -fsanitize=address,leak -fno-omit-frame-pointer>)
-    target_link_options(unit_test PRIVATE $<$<CONFIG:Asan>:-fsanitize=address,leak>)
-
-    # Thread Sanitizer: -O0 -g -fsanitize=thread
-    target_compile_options(unit_test PRIVATE $<$<CONFIG:Tsan>:-O0 -g -fsanitize=thread>)
-    target_link_options(unit_test PRIVATE $<$<CONFIG:Tsan>:-fsanitize=thread>)
+    target_compile_options(unit_test PRIVATE 
+        $<$<CONFIG:Release>:${RELEASE_COMPILE_FLAGS}>
+        $<$<CONFIG:Debug>:${DEBUG_COMPILE_FLAGS}>
+        $<$<CONFIG:Asan>:${ASAN_COMPILE_FLAGS}>
+        $<$<CONFIG:Tsan>:${TSAN_COMPILE_FLAGS}>
+    )
+    
+    target_link_options(unit_test PRIVATE 
+        $<$<CONFIG:Asan>:${ASAN_LINK_FLAGS}>
+        $<$<CONFIG:Tsan>:${TSAN_LINK_FLAGS}>
+    )
 
     # Set custom build types in cache for IDEs and user convenience
     set(CMAKE_BUILD_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING "Choose the build type: Release, Debug, Asan, Tsan")
