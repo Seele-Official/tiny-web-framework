@@ -155,14 +155,17 @@ void run(){
 
 
     std::signal(SIGINT, [](int) {
-        std::println("Received SIGINT, stopping server...");
+        
 
         static std::jthread shutdown_thread([](){
+            std::println("Received SIGINT, stopping server...");
+
             for (auto& fd: env::accepter_fds()){
                 cancel(fd.get());
             }
-
             io::request_stop(); 
+            
+            std::println("Server stopped.");
         });
 
     });

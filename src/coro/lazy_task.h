@@ -66,7 +66,6 @@ private:
     handle_type handle;
 };
 
-// final_suspend suspend_never , so automatically destroyed
 template <>
 class lazy_task<void>{
 public:
@@ -80,7 +79,7 @@ public:
         }
 
         auto final_suspend() noexcept {
-            return std::suspend_never{};
+            return std::suspend_always{};
         }
         void unhandled_exception() {  }
 

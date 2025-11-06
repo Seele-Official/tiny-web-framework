@@ -86,7 +86,7 @@ mpmc_chunk<T, MAX_NODES>::~mpmc_chunk(){
     size_t r = read_index.load(std::memory_order_relaxed);
     size_t w = write_index.load(std::memory_order_relaxed);
     for (size_t i = r; i < w; ++i) {
-        if (data[i].status.load(std::memory_order_relaxed) == READY) {
+        if (data[i].status.load(std::memory_order_acquire) == READY) {
             data[i].get().~T();
         }
     }

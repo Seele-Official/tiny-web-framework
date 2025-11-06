@@ -14,7 +14,6 @@ set_target_properties(web_framework PROPERTIES CXX_EXTENSIONS OFF)
 target_compile_features(web_framework PUBLIC cxx_std_23)
 
 # Set base compile options that will be inherited by consumers
-target_compile_options(web_framework INTERFACE -Wall -Wextra -fno-exceptions -fno-rtti)
 
 target_include_directories(web_framework 
     PUBLIC 
@@ -38,24 +37,39 @@ else()
     option(BUILD_TESTING "Build the testing targets" OFF)
 endif()
 
+
+set(BASE_COMPILE_FLAGS -Wall -Wextra -fno-exceptions -fno-rtti)
+
+set(BASE_LINK_FLAGS "")
+
+
 if(BUILD_TESTING)
     message(STATUS "Tests of web_framework are enabled. Configuring test targets...")
 
     enable_testing()
+    
+    if (NOT DEFINED BASE_BUILD_TYPE)
+        set(BASE_BUILD_TYPE "Release")
+    endif()
 
-    set(RELEASE_COMPILE_FLAGS "-O3")
-    set(DEBUG_COMPILE_FLAGS "-O0 -g")
-    set(ASAN_COMPILE_FLAGS "-O0 -g -fsanitize=address,leak -fno-omit-frame-pointer")
-    set(ASAN_LINK_FLAGS "-fsanitize=address,leak")
-    set(TSAN_COMPILE_FLAGS "-O0 -g -fsanitize=thread")
-    set(TSAN_LINK_FLAGS "-fsanitize=thread")
+    if (BASE_BUILD_TYPE STREQUAL "Release")
+        message(STATUS "Configuring unit_test for Release build")
+        set(BASE_COMPILE_FLAGS ${BASE_COMPILE_FLAGS} -O3)
+    elseif(BASE_BUILD_TYPE STREQUAL "Debug")
+        message(STATUS "Configuring unit_test for Debug build")
+        set(BASE_COMPILE_FLAGS ${BASE_COMPILE_FLAGS} -O0 -g)
+    elseif(BASE_BUILD_TYPE STREQUAL "Asan")
+        message(STATUS "Configuring unit_test for Asan build")
+        set(BASE_COMPILE_FLAGS ${BASE_COMPILE_FLAGS} -O0 -g -fsanitize=address,leak -fno-omit-frame-pointer)
+        set(BASE_LINK_FLAGS ${ASAN_LINK_FLAGS} -fsanitize=address,leak)
+    elseif(BASE_BUILD_TYPE STREQUAL "Tsan")
+        message(STATUS "Configuring unit_test for Tsan build")
+        set(BASE_COMPILE_FLAGS ${BASE_COMPILE_FLAGS} -O0 -g -fsanitize=thread)
+        set(BASE_LINK_FLAGS ${TSAN_LINK_FLAGS} -fsanitize=thread)
+    endif()
 
-    target_compile_options(web_framework PRIVATE 
-        $<$<CONFIG:Release>:${RELEASE_COMPILE_FLAGS}>
-        $<$<CONFIG:Debug>:${DEBUG_COMPILE_FLAGS}>
-        $<$<CONFIG:Asan>:${ASAN_COMPILE_FLAGS}>
-        $<$<CONFIG:Tsan>:${TSAN_COMPILE_FLAGS}>
-    )
+    message(STATUS "Compile flags for unit_test: ${BASE_COMPILE_FLAGS}")
+    message(STATUS "Link flags for unit_test: ${BASE_LINK_FLAGS}")
 
     include(FetchContent)
     FetchContent_Declare(
@@ -69,29 +83,19 @@ if(BUILD_TESTING)
 
     add_executable(unit_test ${TEST_SOURCES})
 
-    target_compile_options(unit_test PRIVATE 
-        $<$<CONFIG:Release>:${RELEASE_COMPILE_FLAGS}>
-        $<$<CONFIG:Debug>:${DEBUG_COMPILE_FLAGS}>
-        $<$<CONFIG:Asan>:${ASAN_COMPILE_FLAGS}>
-        $<$<CONFIG:Tsan>:${TSAN_COMPILE_FLAGS}>
-    )
+    target_compile_options(unit_test PRIVATE ${BASE_COMPILE_FLAGS})
     
-    target_link_options(unit_test PRIVATE 
-        $<$<CONFIG:Asan>:${ASAN_LINK_FLAGS}>
-        $<$<CONFIG:Tsan>:${TSAN_LINK_FLAGS}>
-    )
-
-    # Set custom build types in cache for IDEs and user convenience
-    set(CMAKE_BUILD_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING "Choose the build type: Release, Debug, Asan, Tsan")
-
-    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Release Debug Asan Tsan)
+    target_link_options(unit_test PRIVATE ${BASE_LINK_FLAGS})
 
     target_link_libraries(unit_test PRIVATE web_framework ut)
 
     add_test(NAME CppUnitTests COMMAND unit_test)
-    
-    message("Build type for unit_test set to ${CMAKE_BUILD_TYPE}")
+
 
 else()
     message(STATUS "Tests of web_framework are disabled.")
 endif()
+
+target_compile_options(web_framework PUBLIC ${BASE_COMPILE_FLAGS})
+target_link_options(web_framework PUBLIC ${BASE_LINK_FLAGS})
+
