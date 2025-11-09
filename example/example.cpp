@@ -1,3 +1,4 @@
+#include <csignal>
 #include <logging/log.h>
 #include <logging/sink.h>
 #include <web/env.h>
@@ -19,6 +20,9 @@ http::response::msg make_success_msg(std::string&& content_type, std::string&& b
 }
 
 int main(){
+
+    // Register signal handler for graceful shutdown
+    web::loop::reg_stop_signal(SIGINT);
 
     // Initialize the thread pool
     if (!coro::thread::init(4)) {

@@ -1,17 +1,20 @@
 #include <cstdint>
 #include <csignal>
+#include <print>
 #include <string_view>
-#include <thread>
 #include <utility>
-#include "coro/lazy_task.h"
+
+#include <sys/signalfd.h>
+
+
+#include "io/awaiter.h"
+#include "io/io.h"
 #include "logging/log.h"
 
-#include "web/loop.h"
-
 #include "coro/simple_task.h"
-#include "coro/lazy_task.h"
 #include "coro/thread.h"
 
+#include "web/loop.h"
 #include "web/response.h"
 #include "web/routing.h"
 
@@ -116,10 +119,46 @@ coro::simple_task server_loop(int32_t f) {
 
 
 
-coro::lazy_task<void> cancel(int32_t fd) {
-    while (co_await io::awaiter::cancel_fd{fd} != 0){
-        std::println("Failed to cancel fd: {}", fd);
+coro::simple_task reg_stop_signal(int signo) {
+
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, signo);
+
+    // Block signals so that they are handled only by signalfd
+    if (sigprocmask(SIG_BLOCK, &mask, nullptr) == -1) {
+        std::println("Failed to block signals: {}", strerror(errno));
+        std::terminate();
     }
+
+
+    io::fd sfd = signalfd(-1, &mask, SFD_CLOEXEC);
+    if (!sfd.is_valid()) {
+        std::println("Failed to create signalfd: {}", strerror(errno));
+        std::terminate();
+    }
+
+    signalfd_siginfo ssi;
+    auto ret = co_await io::awaiter::read{sfd.get(), &ssi, sizeof(ssi)};
+
+    if (ret == sizeof(ssi)) {
+        std::println("Received signal ({}), stopping server...", ssi.ssi_signo);
+    } else {
+        std::println("Received signal, stopping server...");
+    }
+    
+    for (auto& fd: env::accepter_fds()){
+
+        while (co_await io::awaiter::cancel_fd{fd.get()} != 0){
+            std::println("Failed to cancel fd: {}", fd.get());
+        }
+    }
+    std::println("All accepter fds cancelled.");
+
+    io::request_stop();
+
+    
+    co_return;
 }
 
 
@@ -152,23 +191,6 @@ void run(){
     for (auto& fd: env::accepter_fds()){
         server_loop(fd.get());
     }
-
-
-    std::signal(SIGINT, [](int) {
-        
-
-        static std::jthread shutdown_thread([](){
-            std::println("Received SIGINT, stopping server...");
-
-            for (auto& fd: env::accepter_fds()){
-                cancel(fd.get());
-            }
-            io::request_stop(); 
-            
-            std::println("Server stopped.");
-        });
-
-    });
 
     io::run();
 

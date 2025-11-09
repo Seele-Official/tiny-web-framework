@@ -1,12 +1,16 @@
 #pragma once
 #include <cstddef>
-#include <vector>
 
 #include "io/io.h"
 #include "web/ip.h"
+#include "coro/simple_task.h"
+
 namespace web::loop {
 
 void run();
+
+coro::simple_task reg_stop_signal(int signo = SIGINT);
+
 
 namespace env {
 inline web::ip::v4& listen_addr(){
